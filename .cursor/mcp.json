@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "oracle-erp": {
+      "command": "/Users/jer.ioet/WP/oracle-erp-mcp/target/release/oracle-erp-mcp",
+      "env": {
+        "ORACLE_MCP_DATABASE": "/Users/jer.ioet/WP/oracle-erp-mcp/oracle-erp-mcp.sqlite"
+      }
+    }
+  }
+}

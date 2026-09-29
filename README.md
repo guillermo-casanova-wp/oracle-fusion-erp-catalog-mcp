@@ -49,11 +49,13 @@ cargo run -- sync --release 26B
 ```
 
 By default, the command synchronizes both Financials and SCM into one release
-and activates it. To synchronize only one module or keep the release inactive:
+and activates it. To synchronize only one module, replace an existing release,
+or keep the release inactive:
 
 ```sh
 cargo run -- sync --release 26B --module financials
 cargo run -- sync --release 26B --no-activate
+cargo run -- sync --release 26B --replace
 ```
 
 ## Initialization example

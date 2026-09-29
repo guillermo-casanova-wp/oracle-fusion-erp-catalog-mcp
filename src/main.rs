@@ -49,7 +49,7 @@ async fn main() -> io::Result<()> {
 }
 
 async fn run_sync_command(args: &[String]) -> anyhow::Result<()> {
-    let (release, modules, activate) = parse_sync_args(args)?;
+    let (release, modules, activate, replace) = parse_sync_args(args)?;
     let database_path =
         env::var("ORACLE_MCP_DATABASE").unwrap_or_else(|_| "oracle-erp-mcp.sqlite".to_owned());
     let database = Database::open(&database_path)?;
@@ -68,15 +68,19 @@ async fn run_sync_command(args: &[String]) -> anyhow::Result<()> {
         tables.extend(extracted);
     }
 
+    if replace {
+        database.delete_version_by_release(&release)?;
+    }
     let version_id = synchronize(&database, &release, tables, activate)?;
     eprintln!("synchronized release {release} as version {version_id}");
     Ok(())
 }
 
-fn parse_sync_args(args: &[String]) -> anyhow::Result<(String, Vec<OracleModule>, bool)> {
+fn parse_sync_args(args: &[String]) -> anyhow::Result<(String, Vec<OracleModule>, bool, bool)> {
     let mut release = None;
     let mut modules = vec![OracleModule::Financials, OracleModule::Scm];
     let mut activate = true;
+    let mut replace = false;
     let mut index = 0;
 
     while index < args.len() {
@@ -106,9 +110,10 @@ fn parse_sync_args(args: &[String]) -> anyhow::Result<(String, Vec<OracleModule>
                 };
             }
             "--no-activate" => activate = false,
+            "--replace" => replace = true,
             "-h" | "--help" => {
                 eprintln!(
-                    "Usage: cargo run -- sync --release RELEASE [--module financials|scm|all] [--no-activate]"
+                    "Usage: cargo run -- sync --release RELEASE [--module financials|scm|all] [--no-activate] [--replace]"
                 );
                 return Err(anyhow::anyhow!("help requested"));
             }
@@ -118,7 +123,7 @@ fn parse_sync_args(args: &[String]) -> anyhow::Result<(String, Vec<OracleModule>
     }
 
     let release = release.ok_or_else(|| anyhow::anyhow!("sync requires --release RELEASE"))?;
-    Ok((release, modules, activate))
+    Ok((release, modules, activate, replace))
 }
 
 async fn run_mcp() -> io::Result<()> {
@@ -335,10 +340,11 @@ mod tests {
             "scm".to_owned(),
             "--no-activate".to_owned(),
         ];
-        let (release, modules, activate) = parse_sync_args(&args).expect("sync options");
+        let (release, modules, activate, replace) = parse_sync_args(&args).expect("sync options");
         assert_eq!(release, "26B");
         assert_eq!(modules, vec![OracleModule::Scm]);
         assert!(!activate);
+        assert!(!replace);
     }
 
     #[test]

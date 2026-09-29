@@ -322,6 +322,13 @@ impl Database {
             .optional()
     }
 
+    pub fn delete_version_by_release(&self, release_code: &str) -> SqlResult<bool> {
+        Ok(self.connection.execute(
+            "DELETE FROM versions WHERE release_code = ?1",
+            params![release_code],
+        )? > 0)
+    }
+
     pub fn version_by_id(&self, id: i64) -> SqlResult<Option<Version>> {
         self.connection
             .query_row(

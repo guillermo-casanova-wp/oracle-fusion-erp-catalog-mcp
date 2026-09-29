@@ -3,7 +3,10 @@ use anyhow::{anyhow, Context, Result};
 use reqwest::Client;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::Duration,
+};
 use url::Url;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,7 +75,10 @@ pub struct OracleExtractor {
 impl OracleExtractor {
     pub fn new() -> Result<Self> {
         Ok(Self {
-            client: Client::builder().user_agent("oracle-erp-mcp/0.1").build()?,
+            client: Client::builder()
+                .user_agent("oracle-erp-mcp/0.1")
+                .timeout(Duration::from_secs(30))
+                .build()?,
         })
     }
 
@@ -91,7 +97,14 @@ impl OracleExtractor {
             .unwrap_or("")
             .to_ascii_lowercase();
         let bytes = response.bytes().await?;
-        self.parse_payload(&bytes, &content_type, source)
+        if content_type.contains("json") || bytes.first() == Some(&b'{') {
+            let document: JsonCatalog = serde_json::from_slice(&bytes)?;
+            return Ok(document.tables);
+        }
+        if content_type.contains("xml") || bytes.starts_with(b"<?xml") {
+            return parse_xml_catalog(&bytes);
+        }
+        self.extract_html_guide(&bytes, source).await
     }
 
     pub fn parse_payload(
@@ -108,6 +121,70 @@ impl OracleExtractor {
             return parse_xml_catalog(payload);
         }
         parse_html_index(payload, source)
+    }
+
+    async fn extract_html_guide(
+        &self,
+        initial_payload: &[u8],
+        source: &OracleSource,
+    ) -> Result<Vec<CatalogTable>> {
+        let next_selector = Selector::parse(r#"link[rel="next"]"#)
+            .map_err(|error| anyhow!("invalid selector: {error}"))?;
+        let prefix = format!(
+            "/en/cloud/saas/{}/{}/{}/",
+            source.module.path(),
+            source.release,
+            source.module.guide()
+        );
+        let mut current_url = source.index_url.clone();
+        let mut current_payload = initial_payload.to_vec();
+        let mut seen = BTreeSet::new();
+        let mut tables = Vec::new();
+
+        for page_number in 0..10_000 {
+            if !seen.insert(current_url.as_str().to_owned()) {
+                break;
+            }
+            if let Some(table) = parse_table_page(&current_payload, &current_url, source)? {
+                tables.push(table);
+            }
+            if page_number > 0 && page_number % 100 == 0 {
+                eprintln!(
+                    "processed {} Oracle guide pages and {} tables",
+                    page_number,
+                    tables.len()
+                );
+            }
+
+            let document = Html::parse_document(
+                std::str::from_utf8(&current_payload).context("HTML page is not UTF-8")?,
+            );
+            let Some(href) = document
+                .select(&next_selector)
+                .next()
+                .and_then(|link| link.value().attr("href"))
+            else {
+                break;
+            };
+            let next_url = current_url.join(href)?;
+            if next_url.host_str() != Some("docs.oracle.com")
+                || !next_url.path().starts_with(&prefix)
+            {
+                break;
+            }
+            current_payload = self
+                .client
+                .get(next_url.clone())
+                .send()
+                .await
+                .with_context(|| format!("downloading {}", next_url))?
+                .error_for_status()?
+                .bytes()
+                .await?
+                .to_vec();
+            current_url = next_url;
+        }
+        Ok(tables)
     }
 }
 
@@ -161,6 +238,128 @@ fn parse_html_index(payload: &[u8], source: &OracleSource) -> Result<Vec<Catalog
         });
     }
     Ok(result)
+}
+
+fn parse_table_page(
+    payload: &[u8],
+    page_url: &Url,
+    source: &OracleSource,
+) -> Result<Option<CatalogTable>> {
+    let html = std::str::from_utf8(payload).context("HTML page is not UTF-8")?;
+    let document = Html::parse_document(html);
+    let columns_selector = Selector::parse(r#"table[summary="Columns"]"#)
+        .map_err(|error| anyhow!("invalid selector: {error}"))?;
+    let Some(columns_table) = document.select(&columns_selector).next() else {
+        return Ok(None);
+    };
+    let title_selector = Selector::parse("h1 .chapterstart")
+        .map_err(|error| anyhow!("invalid selector: {error}"))?;
+    let Some(title) = document.select(&title_selector).next() else {
+        return Ok(None);
+    };
+    let table_name = text_content(title).to_ascii_uppercase();
+    if table_name.is_empty() {
+        return Ok(None);
+    }
+
+    let description_selector = Selector::parse(r#"meta[name="description"]"#)
+        .map_err(|error| anyhow!("invalid selector: {error}"))?;
+    let description = document
+        .select(&description_selector)
+        .next()
+        .and_then(|meta| meta.value().attr("content"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    let row_selector =
+        Selector::parse("tbody tr").map_err(|error| anyhow!("invalid selector: {error}"))?;
+    let cell_selector =
+        Selector::parse("td").map_err(|error| anyhow!("invalid selector: {error}"))?;
+    let mut columns = Vec::new();
+    for row in columns_table.select(&row_selector) {
+        let cells: Vec<_> = row.select(&cell_selector).collect();
+        if cells.len() < 6 {
+            continue;
+        }
+        let column_name = text_content(cells[0]).to_ascii_uppercase();
+        if column_name.is_empty() {
+            continue;
+        }
+        let length_text = text_content(cells[2]);
+        let precision_text = text_content(cells[3]);
+        let length = length_text
+            .parse()
+            .ok()
+            .or_else(|| precision_text.parse().ok());
+        columns.push(crate::db::CatalogColumn {
+            column_name,
+            data_type: text_content(cells[1]),
+            length,
+            nullable: !text_content(cells[4]).eq_ignore_ascii_case("yes"),
+            description: non_empty_text(cells[5]),
+        });
+    }
+
+    let indexes = parse_indexes(&document, &row_selector, &cell_selector)?;
+    Ok(Some(CatalogTable {
+        module: source.module.label().to_owned(),
+        table_name,
+        description,
+        source_url: Some(page_url.to_string()),
+        object_type: Some("TABLE".to_owned()),
+        columns,
+        references: Vec::new(),
+        indexes,
+    }))
+}
+
+fn parse_indexes(
+    document: &Html,
+    row_selector: &Selector,
+    cell_selector: &Selector,
+) -> Result<Vec<crate::db::CatalogIndex>> {
+    let indexes_selector = Selector::parse(r#"table[summary="Indexes"]"#)
+        .map_err(|error| anyhow!("invalid selector: {error}"))?;
+    let Some(indexes_table) = document.select(&indexes_selector).next() else {
+        return Ok(Vec::new());
+    };
+    let mut indexes = Vec::new();
+    for row in indexes_table.select(row_selector) {
+        let cells: Vec<_> = row.select(cell_selector).collect();
+        if cells.len() < 4 {
+            continue;
+        }
+        let index_name = text_content(cells[0]);
+        if index_name.is_empty() {
+            continue;
+        }
+        indexes.push(crate::db::CatalogIndex {
+            index_name,
+            indexed_columns: text_content(cells[3])
+                .split(',')
+                .map(str::trim)
+                .filter(|column| !column.is_empty())
+                .map(str::to_owned)
+                .collect(),
+            is_unique: text_content(cells[1]).eq_ignore_ascii_case("unique"),
+        });
+    }
+    Ok(indexes)
+}
+
+fn text_content(element: scraper::ElementRef<'_>) -> String {
+    element
+        .text()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn non_empty_text(element: scraper::ElementRef<'_>) -> Option<String> {
+    let text = text_content(element);
+    (!text.is_empty()).then_some(text)
 }
 
 fn parse_xml_catalog(payload: &[u8]) -> Result<Vec<CatalogTable>> {
@@ -297,5 +496,55 @@ fn compare_columns(
                 old_column.data_type, new_column.data_type
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_oracle_table_page() {
+        let html = br#"
+            <html>
+              <head>
+                <meta name="description" content="Receipt shipment lines">
+              </head>
+              <body>
+                <h1><span class="chapterstart">RCV_SHIPMENT_LINES</span></h1>
+                <table summary="Columns">
+                  <tbody>
+                    <tr>
+                      <td>SHIPMENT_LINE_ID</td><td>NUMBER</td><td></td><td>18</td>
+                      <td>Yes</td><td>Primary key</td><td></td>
+                    </tr>
+                  </tbody>
+                </table>
+                <table summary="Indexes">
+                  <tbody>
+                    <tr>
+                      <td>RCV_SHIPMENT_LINES_U1</td><td>Unique</td><td>Default</td>
+                      <td>SHIPMENT_LINE_ID</td><td></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </body>
+            </html>
+        "#;
+        let source = OracleSource::help_center(OracleModule::Scm, "26B").expect("source");
+        let page_url = Url::parse(
+            "https://docs.oracle.com/en/cloud/saas/supply-chain-and-manufacturing/26b/oedsc/rcvshipmentlines-24402.html",
+        )
+        .expect("page URL");
+        let table = parse_table_page(html, &page_url, &source)
+            .expect("page parse")
+            .expect("table page");
+
+        assert_eq!(table.table_name, "RCV_SHIPMENT_LINES");
+        assert_eq!(table.columns[0].column_name, "SHIPMENT_LINE_ID");
+        assert_eq!(table.columns[0].length, Some(18));
+        assert!(!table.columns[0].nullable);
+        assert_eq!(table.indexes[0].index_name, "RCV_SHIPMENT_LINES_U1");
+        assert!(table.indexes[0].is_unique);
     }
 }
