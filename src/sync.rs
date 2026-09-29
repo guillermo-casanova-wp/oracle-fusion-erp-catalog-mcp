@@ -27,7 +27,7 @@ impl OracleModule {
         }
     }
 
-    fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Self::Financials => "FINANCIALS",
             Self::Scm => "SCM",

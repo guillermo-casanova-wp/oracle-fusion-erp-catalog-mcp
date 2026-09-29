@@ -3,7 +3,7 @@
 Rust MCP server for querying the Oracle Fusion Cloud Financials and SCM
 technical dictionary through SQLite and FTS5.
 
-## Estado
+## Status
 
 Includes:
 
@@ -13,7 +13,7 @@ Includes:
 - Configurable extractor for HTML, JSON, and XML indexes from Oracle Help Center.
 - Delta calculation between two releases.
 - JSON-RPC 2.0 transport over stdin/stdout and the following tools:
-  `listar_modulos_y_tablas`, `buscar_estructura_tabla` y `sugerir_joins`.
+  `list_modules_and_tables`, `search_table_structure`, and `suggest_joins`.
 
 The official sources and their patterns are documented in
 [`docs/oracle-table-sources.md`](docs/oracle-table-sources.md).
@@ -30,6 +30,22 @@ The SQLite path is configured with `ORACLE_MCP_DATABASE`; the default is
 `oracle-erp-mcp.sqlite`.
 
 Logs are written to stderr. stdout is reserved for MCP messages.
+
+## Synchronization
+
+Download and store a release from the Oracle Help Center:
+
+```sh
+cargo run -- sync --release 26B
+```
+
+By default, the command synchronizes both Financials and SCM into one release
+and activates it. To synchronize only one module or keep the release inactive:
+
+```sh
+cargo run -- sync --release 26B --module financials
+cargo run -- sync --release 26B --no-activate
+```
 
 ## Initialization example
 
