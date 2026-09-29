@@ -18,6 +18,15 @@ Includes:
 The official sources and their patterns are documented in
 [`docs/oracle-table-sources.md`](docs/oracle-table-sources.md).
 
+## Disclaimer
+
+Oracle and Oracle Fusion are trademarks of Oracle Corporation. This project
+is not affiliated with, endorsed by, or sponsored by Oracle Corporation.
+
+The project source code is distributed under the MIT License. Content and
+metadata retrieved from Oracle Help Center remain subject to their respective
+copyright and usage terms.
+
 ## Running
 
 Requires stable Rust (`cargo` and `rustc`) to be installed.
