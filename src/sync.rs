@@ -82,7 +82,7 @@ impl OracleExtractor {
             .get(source.index_url.clone())
             .send()
             .await
-            .with_context(|| format!("descargando {}", source.index_url))?
+            .with_context(|| format!("downloading {}", source.index_url))?
             .error_for_status()?;
         let content_type = response
             .headers()
@@ -112,9 +112,9 @@ impl OracleExtractor {
 }
 
 fn parse_html_index(payload: &[u8], source: &OracleSource) -> Result<Vec<CatalogTable>> {
-    let html = std::str::from_utf8(payload).context("índice HTML no es UTF-8")?;
+    let html = std::str::from_utf8(payload).context("HTML index is not UTF-8")?;
     let document = Html::parse_document(html);
-    let selector = Selector::parse("a").map_err(|error| anyhow!("selector inválido: {error}"))?;
+    let selector = Selector::parse("a").map_err(|error| anyhow!("invalid selector: {error}"))?;
     let prefix = format!(
         "/en/cloud/saas/{}/{}/{}/",
         source.module.path(),
@@ -151,9 +151,9 @@ fn parse_html_index(payload: &[u8], source: &OracleSource) -> Result<Vec<Catalog
             continue;
         }
         result.push(CatalogTable {
-            modulo: source.module.label().to_owned(),
-            nombre_tabla: name,
-            descripcion: Some(anchor.text().collect::<String>().trim().to_owned())
+            module: source.module.label().to_owned(),
+            table_name: name,
+            description: Some(anchor.text().collect::<String>().trim().to_owned())
                 .filter(|value| !value.is_empty()),
             source_url: Some(url.to_string()),
             object_type: None,
@@ -179,7 +179,7 @@ pub fn synchronize(
     activate: bool,
 ) -> Result<i64> {
     if db.version_by_release(release)?.is_some() {
-        return Err(anyhow!("el release {release} ya existe"));
+        return Err(anyhow!("release {release} already exists"));
     }
     let version_id = if let Some(previous) = db.active_version()? {
         db.clone_version(previous.id, release)?
@@ -187,11 +187,11 @@ pub fn synchronize(
         db.create_version(release, activate)?
     };
     for table in &mut tables {
-        table.nombre_tabla = table.nombre_tabla.to_ascii_uppercase();
+        table.table_name = table.table_name.to_ascii_uppercase();
         let mut skeleton = table.clone();
-        skeleton.columnas.clear();
-        skeleton.referencias.clear();
-        skeleton.indices.clear();
+        skeleton.columns.clear();
+        skeleton.references.clear();
+        skeleton.indexes.clear();
         db.upsert_catalog_table(version_id, &skeleton)?;
     }
     for table in &tables {
@@ -218,19 +218,19 @@ pub struct DiffReport {
 pub fn diff_versions(db: &Database, from_id: i64, to_id: i64) -> Result<DiffReport> {
     let from = db
         .version_by_id(from_id)?
-        .ok_or_else(|| anyhow!("versión origen inexistente"))?;
+        .ok_or_else(|| anyhow!("source version does not exist"))?;
     let to = db
         .version_by_id(to_id)?
-        .ok_or_else(|| anyhow!("versión destino inexistente"))?;
+        .ok_or_else(|| anyhow!("target version does not exist"))?;
     let from_tables = db.tables_for_version(from_id)?;
     let to_tables = db.tables_for_version(to_id)?;
     let from_map: BTreeMap<_, _> = from_tables
         .iter()
-        .map(|table| (table.nombre_tabla.clone(), table))
+        .map(|table| (table.table_name.clone(), table))
         .collect();
     let to_map: BTreeMap<_, _> = to_tables
         .iter()
-        .map(|table| (table.nombre_tabla.clone(), table))
+        .map(|table| (table.table_name.clone(), table))
         .collect();
     let new_tables = to_map
         .keys()
@@ -254,10 +254,10 @@ pub fn diff_versions(db: &Database, from_id: i64, to_id: i64) -> Result<DiffRepo
     for name in from_map.keys().filter(|name| to_map.contains_key(*name)) {
         let old = db
             .table_structure_in_version(from_id, name)?
-            .ok_or_else(|| anyhow!("tabla origen inconsistente: {name}"))?;
+            .ok_or_else(|| anyhow!("inconsistent source table: {name}"))?;
         let new = db
             .table_structure_in_version(to_id, name)?
-            .ok_or_else(|| anyhow!("tabla destino inconsistente: {name}"))?;
+            .ok_or_else(|| anyhow!("inconsistent target table: {name}"))?;
         compare_columns(name, &old, &new, &mut report);
     }
     Ok(report)
@@ -270,14 +270,14 @@ fn compare_columns(
     report: &mut DiffReport,
 ) {
     let old_map: BTreeMap<_, _> = old
-        .columnas
+        .columns
         .iter()
-        .map(|column| (column.nombre_columna.clone(), column))
+        .map(|column| (column.column_name.clone(), column))
         .collect();
     let new_map: BTreeMap<_, _> = new
-        .columnas
+        .columns
         .iter()
-        .map(|column| (column.nombre_columna.clone(), column))
+        .map(|column| (column.column_name.clone(), column))
         .collect();
     for column in new_map.keys().filter(|key| !old_map.contains_key(*key)) {
         report.added_columns.push(format!("{name}.{column}"));
@@ -288,13 +288,13 @@ fn compare_columns(
     for column in old_map.keys().filter(|key| new_map.contains_key(*key)) {
         let old_column = old_map[column];
         let new_column = new_map[column];
-        if old_column.tipo_datos != new_column.tipo_datos
-            || old_column.longitud != new_column.longitud
+        if old_column.data_type != new_column.data_type
+            || old_column.length != new_column.length
             || old_column.nullable != new_column.nullable
         {
             report.changed_columns.push(format!(
                 "{name}.{column}: {} -> {}",
-                old_column.tipo_datos, new_column.tipo_datos
+                old_column.data_type, new_column.data_type
             ));
         }
     }

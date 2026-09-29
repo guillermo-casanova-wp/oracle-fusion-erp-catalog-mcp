@@ -2,7 +2,7 @@
 name = "oracle-erp-mcp"
 version = "0.1.0"
 edition = "2021"
-description = "Servidor MCP y RAG léxico para el diccionario técnico de Oracle Fusion Cloud ERP"
+description = "MCP server and lexical RAG for the Oracle Fusion Cloud ERP technical dictionary"
 license = "MIT"
 
 [dependencies]

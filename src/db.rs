@@ -6,17 +6,17 @@ use std::path::Path;
 pub struct Version {
     pub id: i64,
     pub release_code: String,
-    pub fecha_sincronizacion: String,
-    pub activo: bool,
+    pub synced_at: String,
+    pub active: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TableRecord {
     pub id: i64,
     pub version_id: i64,
-    pub modulo: String,
-    pub nombre_tabla: String,
-    pub descripcion: Option<String>,
+    pub module: String,
+    pub table_name: String,
+    pub description: Option<String>,
     pub source_url: Option<String>,
     pub object_type: Option<String>,
 }
@@ -24,76 +24,76 @@ pub struct TableRecord {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ColumnRecord {
     pub id: i64,
-    pub tabla_id: i64,
-    pub nombre_columna: String,
-    pub tipo_datos: String,
-    pub longitud: Option<i64>,
+    pub table_id: i64,
+    pub column_name: String,
+    pub data_type: String,
+    pub length: Option<i64>,
     pub nullable: bool,
-    pub descripcion: Option<String>,
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ReferenceRecord {
     pub id: i64,
-    pub tabla_origen_id: i64,
-    pub columna_origen: String,
-    pub tabla_destino_id: i64,
-    pub columna_destino: String,
-    pub nombre_constraint: Option<String>,
+    pub source_table_id: i64,
+    pub source_column: String,
+    pub target_table_id: i64,
+    pub target_column: String,
+    pub constraint_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct IndexRecord {
     pub id: i64,
-    pub tabla_id: i64,
-    pub nombre_indice: String,
-    pub columnas_indexadas: String,
-    pub es_unico: bool,
+    pub table_id: i64,
+    pub index_name: String,
+    pub indexed_columns: String,
+    pub is_unique: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableStructure {
-    pub tabla: TableRecord,
-    pub columnas: Vec<ColumnRecord>,
-    pub referencias_salientes: Vec<ReferenceRecord>,
-    pub referencias_entrantes: Vec<ReferenceRecord>,
-    pub indices: Vec<IndexRecord>,
+    pub table: TableRecord,
+    pub columns: Vec<ColumnRecord>,
+    pub outgoing_references: Vec<ReferenceRecord>,
+    pub incoming_references: Vec<ReferenceRecord>,
+    pub indexes: Vec<IndexRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CatalogTable {
-    pub modulo: String,
-    pub nombre_tabla: String,
-    pub descripcion: Option<String>,
+    pub module: String,
+    pub table_name: String,
+    pub description: Option<String>,
     pub source_url: Option<String>,
     pub object_type: Option<String>,
-    pub columnas: Vec<CatalogColumn>,
-    pub referencias: Vec<CatalogReference>,
-    pub indices: Vec<CatalogIndex>,
+    pub columns: Vec<CatalogColumn>,
+    pub references: Vec<CatalogReference>,
+    pub indexes: Vec<CatalogIndex>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CatalogColumn {
-    pub nombre_columna: String,
-    pub tipo_datos: String,
-    pub longitud: Option<i64>,
+    pub column_name: String,
+    pub data_type: String,
+    pub length: Option<i64>,
     pub nullable: bool,
-    pub descripcion: Option<String>,
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CatalogReference {
-    pub tabla_destino: String,
-    pub columna_origen: String,
-    pub columna_destino: String,
-    pub nombre_constraint: Option<String>,
+    pub target_table: String,
+    pub source_column: String,
+    pub target_column: String,
+    pub constraint_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CatalogIndex {
-    pub nombre_indice: String,
-    pub columnas_indexadas: Vec<String>,
-    pub es_unico: bool,
+    pub index_name: String,
+    pub indexed_columns: Vec<String>,
+    pub is_unique: bool,
 }
 
 pub struct Database {
@@ -113,76 +113,174 @@ impl Database {
         Self::open(":memory:")
     }
 
+    fn migrate_legacy_schema(&self) -> SqlResult<()> {
+        for (old_name, new_name) in [
+            ("tabla_versiones", "versions"),
+            ("tablas", "tables"),
+            ("columnas", "columns"),
+            ("referencias", "foreign_key_references"),
+            ("indices", "indexes"),
+        ] {
+            let old_exists = self.table_exists(old_name)?;
+            let new_exists = self.table_exists(new_name)?;
+            if old_exists && !new_exists {
+                self.connection
+                    .execute_batch(&format!("ALTER TABLE {old_name} RENAME TO {new_name};"))?;
+            }
+        }
+
+        for (table, old_name, new_name) in [
+            ("versions", "fecha_sincronizacion", "synced_at"),
+            ("versions", "activo_bool", "active_bool"),
+            ("tables", "modulo", "module"),
+            ("tables", "nombre_tabla", "table_name"),
+            ("tables", "descripcion", "description"),
+            ("columns", "tabla_id", "table_id"),
+            ("columns", "nombre_columna", "column_name"),
+            ("columns", "tipo_datos", "data_type"),
+            ("columns", "longitud", "length"),
+            ("columns", "descripcion", "description"),
+            (
+                "foreign_key_references",
+                "tabla_origen_id",
+                "source_table_id",
+            ),
+            ("foreign_key_references", "columna_origen", "source_column"),
+            (
+                "foreign_key_references",
+                "tabla_destino_id",
+                "target_table_id",
+            ),
+            ("foreign_key_references", "columna_destino", "target_column"),
+            (
+                "foreign_key_references",
+                "nombre_constraint",
+                "constraint_name",
+            ),
+            ("indexes", "tabla_id", "table_id"),
+            ("indexes", "nombre_indice", "index_name"),
+            ("indexes", "columnas_indexadas", "indexed_columns"),
+            ("indexes", "es_unico", "is_unique"),
+        ] {
+            if self.column_exists(table, old_name)? && !self.column_exists(table, new_name)? {
+                self.connection.execute_batch(&format!(
+                    "ALTER TABLE {table} RENAME COLUMN {old_name} TO {new_name};"
+                ))?;
+            }
+        }
+
+        self.connection.execute_batch(
+            "DROP TABLE IF EXISTS tablas_fts;
+             DROP TABLE IF EXISTS tables_fts;
+             DROP INDEX IF EXISTS idx_tablas_version_modulo;
+             DROP INDEX IF EXISTS idx_columnas_tabla;",
+        )?;
+        Ok(())
+    }
+
+    fn table_exists(&self, name: &str) -> SqlResult<bool> {
+        self.connection.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1
+            )",
+            params![name],
+            |row| row.get(0),
+        )
+    }
+
+    fn column_exists(&self, table: &str, name: &str) -> SqlResult<bool> {
+        let mut statement = self
+            .connection
+            .prepare(&format!("PRAGMA table_info({table})"))?;
+        let mut rows = statement.query([])?;
+        while let Some(row) = rows.next()? {
+            if row.get::<_, String>(1)? == name {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     fn migrate(&self) -> SqlResult<()> {
+        self.migrate_legacy_schema()?;
         self.connection.execute_batch(
             r#"
-            CREATE TABLE IF NOT EXISTS tabla_versiones (
+            CREATE TABLE IF NOT EXISTS versions (
                 id INTEGER PRIMARY KEY,
                 release_code TEXT NOT NULL UNIQUE,
-                fecha_sincronizacion TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                activo_bool INTEGER NOT NULL DEFAULT 0 CHECK (activo_bool IN (0, 1))
+                synced_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                active_bool INTEGER NOT NULL DEFAULT 0 CHECK (active_bool IN (0, 1))
             );
-            CREATE TABLE IF NOT EXISTS tablas (
+            CREATE TABLE IF NOT EXISTS tables (
                 id INTEGER PRIMARY KEY,
-                version_id INTEGER NOT NULL REFERENCES tabla_versiones(id) ON DELETE CASCADE,
-                modulo TEXT NOT NULL,
-                nombre_tabla TEXT NOT NULL,
-                descripcion TEXT,
+                version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+                module TEXT NOT NULL,
+                table_name TEXT NOT NULL,
+                description TEXT,
                 source_url TEXT,
                 object_type TEXT,
-                UNIQUE(version_id, nombre_tabla)
+                UNIQUE(version_id, table_name)
             );
-            CREATE TABLE IF NOT EXISTS columnas (
+            CREATE TABLE IF NOT EXISTS columns (
                 id INTEGER PRIMARY KEY,
-                tabla_id INTEGER NOT NULL REFERENCES tablas(id) ON DELETE CASCADE,
-                nombre_columna TEXT NOT NULL,
-                tipo_datos TEXT NOT NULL,
-                longitud INTEGER,
+                table_id INTEGER NOT NULL REFERENCES tables(id) ON DELETE CASCADE,
+                column_name TEXT NOT NULL,
+                data_type TEXT NOT NULL,
+                length INTEGER,
                 nullable INTEGER NOT NULL DEFAULT 1 CHECK (nullable IN (0, 1)),
-                descripcion TEXT,
-                UNIQUE(tabla_id, nombre_columna)
+                description TEXT,
+                UNIQUE(table_id, column_name)
             );
-            CREATE TABLE IF NOT EXISTS referencias (
+            CREATE TABLE IF NOT EXISTS foreign_key_references (
                 id INTEGER PRIMARY KEY,
-                tabla_origen_id INTEGER NOT NULL REFERENCES tablas(id) ON DELETE CASCADE,
-                columna_origen TEXT NOT NULL,
-                tabla_destino_id INTEGER NOT NULL REFERENCES tablas(id) ON DELETE CASCADE,
-                columna_destino TEXT NOT NULL,
-                nombre_constraint TEXT,
-                UNIQUE(tabla_origen_id, columna_origen, tabla_destino_id, columna_destino)
+                source_table_id INTEGER NOT NULL REFERENCES tables(id) ON DELETE CASCADE,
+                source_column TEXT NOT NULL,
+                target_table_id INTEGER NOT NULL REFERENCES tables(id) ON DELETE CASCADE,
+                target_column TEXT NOT NULL,
+                constraint_name TEXT,
+                UNIQUE(source_table_id, source_column, target_table_id, target_column)
             );
-            CREATE TABLE IF NOT EXISTS indices (
+            CREATE TABLE IF NOT EXISTS indexes (
                 id INTEGER PRIMARY KEY,
-                tabla_id INTEGER NOT NULL REFERENCES tablas(id) ON DELETE CASCADE,
-                nombre_indice TEXT NOT NULL,
-                columnas_indexadas TEXT NOT NULL,
-                es_unico INTEGER NOT NULL DEFAULT 0 CHECK (es_unico IN (0, 1)),
-                UNIQUE(tabla_id, nombre_indice)
+                table_id INTEGER NOT NULL REFERENCES tables(id) ON DELETE CASCADE,
+                index_name TEXT NOT NULL,
+                indexed_columns TEXT NOT NULL,
+                is_unique INTEGER NOT NULL DEFAULT 0 CHECK (is_unique IN (0, 1)),
+                UNIQUE(table_id, index_name)
             );
-            CREATE VIRTUAL TABLE IF NOT EXISTS tablas_fts USING fts5(
-                nombre_tabla,
-                descripcion_tabla,
-                nombres_columnas,
-                descripciones_columnas,
-                tabla_id UNINDEXED,
+            CREATE VIRTUAL TABLE IF NOT EXISTS tables_fts USING fts5(
+                table_name,
+                table_description,
+                column_names,
+                column_descriptions,
+                table_id UNINDEXED,
                 version_id UNINDEXED,
                 tokenize = 'unicode61 remove_diacritics 2'
             );
-            CREATE INDEX IF NOT EXISTS idx_tablas_version_modulo
-                ON tablas(version_id, modulo);
-            CREATE INDEX IF NOT EXISTS idx_columnas_tabla
-                ON columnas(tabla_id);
+            CREATE INDEX IF NOT EXISTS idx_tables_version_module
+                ON tables(version_id, module);
+            CREATE INDEX IF NOT EXISTS idx_columns_table
+                ON columns(table_id);
             "#,
-        )
+        )?;
+        let version_ids: Vec<i64> = self
+            .connection
+            .prepare("SELECT id FROM versions")?
+            .query_map([], |row| row.get(0))?
+            .collect::<SqlResult<Vec<_>>>()?;
+        for version_id in version_ids {
+            self.rebuild_fts(version_id)?;
+        }
+        Ok(())
     }
 
     pub fn create_version(&self, release_code: &str, active: bool) -> SqlResult<i64> {
         if active {
             self.connection
-                .execute("UPDATE tabla_versiones SET activo_bool = 0", [])?;
+                .execute("UPDATE versions SET active_bool = 0", [])?;
         }
         self.connection.execute(
-            "INSERT INTO tabla_versiones (release_code, activo_bool) VALUES (?1, ?2)",
+            "INSERT INTO versions (release_code, active_bool) VALUES (?1, ?2)",
             params![release_code, active],
         )?;
         Ok(self.connection.last_insert_rowid())
@@ -191,15 +289,15 @@ impl Database {
     pub fn active_version(&self) -> SqlResult<Option<Version>> {
         self.connection
             .query_row(
-                "SELECT id, release_code, fecha_sincronizacion, activo_bool
-                 FROM tabla_versiones WHERE activo_bool = 1 LIMIT 1",
+                "SELECT id, release_code, synced_at, active_bool
+                 FROM versions WHERE active_bool = 1 LIMIT 1",
                 [],
                 |row| {
                     Ok(Version {
                         id: row.get(0)?,
                         release_code: row.get(1)?,
-                        fecha_sincronizacion: row.get(2)?,
-                        activo: row.get(3)?,
+                        synced_at: row.get(2)?,
+                        active: row.get(3)?,
                     })
                 },
             )
@@ -209,15 +307,15 @@ impl Database {
     pub fn version_by_release(&self, release_code: &str) -> SqlResult<Option<Version>> {
         self.connection
             .query_row(
-                "SELECT id, release_code, fecha_sincronizacion, activo_bool
-                 FROM tabla_versiones WHERE release_code = ?1",
+                "SELECT id, release_code, synced_at, active_bool
+                 FROM versions WHERE release_code = ?1",
                 params![release_code],
                 |row| {
                     Ok(Version {
                         id: row.get(0)?,
                         release_code: row.get(1)?,
-                        fecha_sincronizacion: row.get(2)?,
-                        activo: row.get(3)?,
+                        synced_at: row.get(2)?,
+                        active: row.get(3)?,
                     })
                 },
             )
@@ -227,15 +325,15 @@ impl Database {
     pub fn version_by_id(&self, id: i64) -> SqlResult<Option<Version>> {
         self.connection
             .query_row(
-                "SELECT id, release_code, fecha_sincronizacion, activo_bool
-                 FROM tabla_versiones WHERE id = ?1",
+                "SELECT id, release_code, synced_at, active_bool
+                 FROM versions WHERE id = ?1",
                 params![id],
                 |row| {
                     Ok(Version {
                         id: row.get(0)?,
                         release_code: row.get(1)?,
-                        fecha_sincronizacion: row.get(2)?,
-                        activo: row.get(3)?,
+                        synced_at: row.get(2)?,
+                        active: row.get(3)?,
                     })
                 },
             )
@@ -246,9 +344,9 @@ impl Database {
         self.connection.execute_batch("BEGIN IMMEDIATE")?;
         let result = (|| {
             self.connection
-                .execute("UPDATE tabla_versiones SET activo_bool = 0", [])?;
+                .execute("UPDATE versions SET active_bool = 0", [])?;
             self.connection.execute(
-                "UPDATE tabla_versiones SET activo_bool = 1 WHERE id = ?1",
+                "UPDATE versions SET active_bool = 1 WHERE id = ?1",
                 params![version_id],
             )?;
             Ok::<_, rusqlite::Error>(())
@@ -265,53 +363,53 @@ impl Database {
     pub fn clone_version(&self, source_id: i64, release_code: &str) -> SqlResult<i64> {
         let tx = self.connection.unchecked_transaction()?;
         tx.execute(
-            "INSERT INTO tabla_versiones (release_code, activo_bool)
+            "INSERT INTO versions (release_code, active_bool)
              VALUES (?1, 0)",
             params![release_code],
         )?;
         let target_id = tx.last_insert_rowid();
         tx.execute(
-            "INSERT INTO tablas
-             (version_id, modulo, nombre_tabla, descripcion, source_url, object_type)
-             SELECT ?1, modulo, nombre_tabla, descripcion, source_url, object_type
-             FROM tablas WHERE version_id = ?2",
+            "INSERT INTO tables
+             (version_id, module, table_name, description, source_url, object_type)
+             SELECT ?1, module, table_name, description, source_url, object_type
+             FROM tables WHERE version_id = ?2",
             params![target_id, source_id],
         )?;
         tx.execute(
-            "INSERT INTO columnas
-             (tabla_id, nombre_columna, tipo_datos, longitud, nullable, descripcion)
-             SELECT target.id, source.nombre_columna, source.tipo_datos, source.longitud,
-                    source.nullable, source.descripcion
-             FROM columnas source
-             JOIN tablas source_table ON source_table.id = source.tabla_id
-             JOIN tablas target ON target.version_id = ?1
-                AND target.nombre_tabla = source_table.nombre_tabla
+            "INSERT INTO columns
+             (table_id, column_name, data_type, length, nullable, description)
+             SELECT target.id, source.column_name, source.data_type, source.length,
+                    source.nullable, source.description
+             FROM columns source
+             JOIN tables source_table ON source_table.id = source.table_id
+             JOIN tables target ON target.version_id = ?1
+                AND target.table_name = source_table.table_name
              WHERE source_table.version_id = ?2",
             params![target_id, source_id],
         )?;
         tx.execute(
-            "INSERT INTO indices
-             (tabla_id, nombre_indice, columnas_indexadas, es_unico)
-             SELECT target.id, source.nombre_indice, source.columnas_indexadas, source.es_unico
-             FROM indices source
-             JOIN tablas source_table ON source_table.id = source.tabla_id
-             JOIN tablas target ON target.version_id = ?1
-                AND target.nombre_tabla = source_table.nombre_tabla
+            "INSERT INTO indexes
+             (table_id, index_name, indexed_columns, is_unique)
+             SELECT target.id, source.index_name, source.indexed_columns, source.is_unique
+             FROM indexes source
+             JOIN tables source_table ON source_table.id = source.table_id
+             JOIN tables target ON target.version_id = ?1
+                AND target.table_name = source_table.table_name
              WHERE source_table.version_id = ?2",
             params![target_id, source_id],
         )?;
         tx.execute(
-            "INSERT INTO referencias
-             (tabla_origen_id, columna_origen, tabla_destino_id, columna_destino, nombre_constraint)
-             SELECT source_target.id, r.columna_origen, destination_target.id,
-                    r.columna_destino, r.nombre_constraint
-             FROM referencias r
-             JOIN tablas source_table ON source_table.id = r.tabla_origen_id
-             JOIN tablas destination_table ON destination_table.id = r.tabla_destino_id
-             JOIN tablas source_target ON source_target.version_id = ?1
-                AND source_target.nombre_tabla = source_table.nombre_tabla
-             JOIN tablas destination_target ON destination_target.version_id = ?1
-                AND destination_target.nombre_tabla = destination_table.nombre_tabla
+            "INSERT INTO foreign_key_references
+             (source_table_id, source_column, target_table_id, target_column, constraint_name)
+             SELECT source_target.id, r.source_column, destination_target.id,
+                    r.target_column, r.constraint_name
+             FROM foreign_key_references r
+             JOIN tables source_table ON source_table.id = r.source_table_id
+             JOIN tables destination_table ON destination_table.id = r.target_table_id
+             JOIN tables source_target ON source_target.version_id = ?1
+                AND source_target.table_name = source_table.table_name
+             JOIN tables destination_target ON destination_target.version_id = ?1
+                AND destination_target.table_name = destination_table.table_name
              WHERE source_table.version_id = ?2 AND destination_table.version_id = ?2",
             params![target_id, source_id],
         )?;
@@ -323,85 +421,82 @@ impl Database {
     pub fn upsert_catalog_table(&self, version_id: i64, table: &CatalogTable) -> SqlResult<i64> {
         let tx = self.connection.unchecked_transaction()?;
         tx.execute(
-            "INSERT INTO tablas (version_id, modulo, nombre_tabla, descripcion, source_url, object_type)
+            "INSERT INTO tables (version_id, module, table_name, description, source_url, object_type)
              VALUES (?1, ?2, upper(?3), ?4, ?5, ?6)
-             ON CONFLICT(version_id, nombre_tabla) DO UPDATE SET
-               modulo = excluded.modulo, descripcion = excluded.descripcion,
+             ON CONFLICT(version_id, table_name) DO UPDATE SET
+               module = excluded.module, description = excluded.description,
                source_url = excluded.source_url, object_type = excluded.object_type",
             params![
                 version_id,
-                table.modulo,
-                table.nombre_tabla,
-                table.descripcion,
+                table.module,
+                table.table_name,
+                table.description,
                 table.source_url,
                 table.object_type
             ],
         )?;
         let table_id: i64 = tx.query_row(
-            "SELECT id FROM tablas WHERE version_id = ?1 AND nombre_tabla = upper(?2)",
-            params![version_id, table.nombre_tabla],
+            "SELECT id FROM tables WHERE version_id = ?1 AND table_name = upper(?2)",
+            params![version_id, table.table_name],
             |row| row.get(0),
         )?;
 
-        tx.execute(
-            "DELETE FROM columnas WHERE tabla_id = ?1",
-            params![table_id],
-        )?;
-        for column in &table.columnas {
+        tx.execute("DELETE FROM columns WHERE table_id = ?1", params![table_id])?;
+        for column in &table.columns {
             tx.execute(
-                "INSERT INTO columnas
-                 (tabla_id, nombre_columna, tipo_datos, longitud, nullable, descripcion)
+                "INSERT INTO columns
+                 (table_id, column_name, data_type, length, nullable, description)
                  VALUES (?1, upper(?2), ?3, ?4, ?5, ?6)",
                 params![
                     table_id,
-                    column.nombre_columna,
-                    column.tipo_datos,
-                    column.longitud,
+                    column.column_name,
+                    column.data_type,
+                    column.length,
                     column.nullable,
-                    column.descripcion
+                    column.description
                 ],
             )?;
         }
 
         tx.execute(
-            "DELETE FROM referencias WHERE tabla_origen_id = ?1",
+            "DELETE FROM foreign_key_references WHERE source_table_id = ?1",
             params![table_id],
         )?;
-        for reference in &table.referencias {
+        for reference in &table.references {
             let destination_id: Option<i64> = tx
                 .query_row(
-                    "SELECT id FROM tablas WHERE version_id = ?1 AND nombre_tabla = upper(?2)",
-                    params![version_id, reference.tabla_destino],
+                    "SELECT id FROM tables WHERE version_id = ?1 AND table_name = upper(?2)",
+                    params![version_id, reference.target_table],
                     |row| row.get(0),
                 )
                 .optional()?;
             if let Some(destination_id) = destination_id {
                 tx.execute(
-                    "INSERT OR IGNORE INTO referencias
-                     (tabla_origen_id, columna_origen, tabla_destino_id, columna_destino, nombre_constraint)
+                    "INSERT OR IGNORE INTO foreign_key_references
+                     (source_table_id, source_column, target_table_id, target_column, constraint_name)
                      VALUES (?1, upper(?2), ?3, upper(?4), ?5)",
                     params![
                         table_id,
-                        reference.columna_origen,
+                        reference.source_column,
                         destination_id,
-                        reference.columna_destino,
-                        reference.nombre_constraint
+                        reference.target_column,
+                        reference.constraint_name
                     ],
                 )?;
             }
         }
 
-        tx.execute("DELETE FROM indices WHERE tabla_id = ?1", params![table_id])?;
-        for index in &table.indices {
+        tx.execute("DELETE FROM indexes WHERE table_id = ?1", params![table_id])?;
+        for index in &table.indexes {
             tx.execute(
-                "INSERT INTO indices
-                 (tabla_id, nombre_indice, columnas_indexadas, es_unico)
+                "INSERT INTO indexes
+                 (table_id, index_name, indexed_columns, is_unique)
                  VALUES (?1, upper(?2), ?3, ?4)",
                 params![
                     table_id,
-                    index.nombre_indice,
-                    index.columnas_indexadas.join(","),
-                    index.es_unico
+                    index.index_name,
+                    index.indexed_columns.join(","),
+                    index.is_unique
                 ],
             )?;
         }
@@ -412,17 +507,17 @@ impl Database {
 
     pub fn rebuild_fts(&self, version_id: i64) -> SqlResult<()> {
         self.connection.execute(
-            "DELETE FROM tablas_fts WHERE version_id = ?1",
+            "DELETE FROM tables_fts WHERE version_id = ?1",
             params![version_id],
         )?;
         self.connection.execute(
-            "INSERT INTO tablas_fts
-             (nombre_tabla, descripcion_tabla, nombres_columnas, descripciones_columnas, tabla_id, version_id)
-             SELECT t.nombre_tabla, COALESCE(t.descripcion, ''),
-                    COALESCE(GROUP_CONCAT(c.nombre_columna, ' '), ''),
-                    COALESCE(GROUP_CONCAT(COALESCE(c.descripcion, ''), ' '), ''),
+            "INSERT INTO tables_fts
+             (table_name, table_description, column_names, column_descriptions, table_id, version_id)
+             SELECT t.table_name, COALESCE(t.description, ''),
+                    COALESCE(GROUP_CONCAT(c.column_name, ' '), ''),
+                    COALESCE(GROUP_CONCAT(COALESCE(c.description, ''), ' '), ''),
                     t.id, t.version_id
-             FROM tablas t LEFT JOIN columnas c ON c.tabla_id = t.id
+             FROM tables t LEFT JOIN columns c ON c.table_id = t.id
              WHERE t.version_id = ?1 GROUP BY t.id",
             params![version_id],
         )?;
@@ -434,18 +529,18 @@ impl Database {
             .active_version()?
             .ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)?;
         let mut statement = self.connection.prepare(
-            "SELECT id, version_id, modulo, nombre_tabla, descripcion, source_url, object_type
-             FROM tablas WHERE version_id = ?1
-             AND (?2 IS NULL OR lower(modulo) = lower(?2))
-             ORDER BY modulo, nombre_tabla",
+            "SELECT id, version_id, module, table_name, description, source_url, object_type
+             FROM tables WHERE version_id = ?1
+             AND (?2 IS NULL OR lower(module) = lower(?2))
+             ORDER BY module, table_name",
         )?;
         let rows = statement.query_map(params![version.id, module], |row| {
             Ok(TableRecord {
                 id: row.get(0)?,
                 version_id: row.get(1)?,
-                modulo: row.get(2)?,
-                nombre_tabla: row.get(3)?,
-                descripcion: row.get(4)?,
+                module: row.get(2)?,
+                table_name: row.get(3)?,
+                description: row.get(4)?,
                 source_url: row.get(5)?,
                 object_type: row.get(6)?,
             })
@@ -455,17 +550,17 @@ impl Database {
 
     pub fn tables_for_version(&self, version_id: i64) -> SqlResult<Vec<TableRecord>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, version_id, modulo, nombre_tabla, descripcion, source_url, object_type
-             FROM tablas WHERE version_id = ?1 ORDER BY nombre_tabla",
+            "SELECT id, version_id, module, table_name, description, source_url, object_type
+             FROM tables WHERE version_id = ?1 ORDER BY table_name",
         )?;
         let rows = statement
             .query_map(params![version_id], |row| {
                 Ok(TableRecord {
                     id: row.get(0)?,
                     version_id: row.get(1)?,
-                    modulo: row.get(2)?,
-                    nombre_tabla: row.get(3)?,
-                    descripcion: row.get(4)?,
+                    module: row.get(2)?,
+                    table_name: row.get(3)?,
+                    description: row.get(4)?,
                     source_url: row.get(5)?,
                     object_type: row.get(6)?,
                 })
@@ -482,16 +577,16 @@ impl Database {
         let table = self
             .connection
             .query_row(
-                "SELECT id, version_id, modulo, nombre_tabla, descripcion, source_url, object_type
-                 FROM tablas WHERE version_id = ?1 AND nombre_tabla = upper(?2)",
+                "SELECT id, version_id, module, table_name, description, source_url, object_type
+                 FROM tables WHERE version_id = ?1 AND table_name = upper(?2)",
                 params![version_id, table_name],
                 |row| {
                     Ok(TableRecord {
                         id: row.get(0)?,
                         version_id: row.get(1)?,
-                        modulo: row.get(2)?,
-                        nombre_tabla: row.get(3)?,
-                        descripcion: row.get(4)?,
+                        module: row.get(2)?,
+                        table_name: row.get(3)?,
+                        description: row.get(4)?,
                         source_url: row.get(5)?,
                         object_type: row.get(6)?,
                     })
@@ -501,33 +596,31 @@ impl Database {
         let Some(table) = table else {
             return Ok(None);
         };
-        let columnas = self.query_columns(table.id)?;
-        let referencias_salientes =
-            self.query_references("WHERE tabla_origen_id = ?1", table.id)?;
-        let referencias_entrantes =
-            self.query_references("WHERE tabla_destino_id = ?1", table.id)?;
-        let mut indices = Vec::new();
+        let columns = self.query_columns(table.id)?;
+        let outgoing_references = self.query_references("WHERE source_table_id = ?1", table.id)?;
+        let incoming_references = self.query_references("WHERE target_table_id = ?1", table.id)?;
+        let mut indexes = Vec::new();
         let mut statement = self.connection.prepare(
-            "SELECT id, tabla_id, nombre_indice, columnas_indexadas, es_unico
-             FROM indices WHERE tabla_id = ?1 ORDER BY nombre_indice",
+            "SELECT id, table_id, index_name, indexed_columns, is_unique
+             FROM indexes WHERE table_id = ?1 ORDER BY index_name",
         )?;
         for row in statement.query_map(params![table.id], |row| {
             Ok(IndexRecord {
                 id: row.get(0)?,
-                tabla_id: row.get(1)?,
-                nombre_indice: row.get(2)?,
-                columnas_indexadas: row.get(3)?,
-                es_unico: row.get(4)?,
+                table_id: row.get(1)?,
+                index_name: row.get(2)?,
+                indexed_columns: row.get(3)?,
+                is_unique: row.get(4)?,
             })
         })? {
-            indices.push(row?);
+            indexes.push(row?);
         }
         Ok(Some(TableStructure {
-            tabla: table,
-            columnas,
-            referencias_salientes,
-            referencias_entrantes,
-            indices,
+            table: table,
+            columns,
+            outgoing_references,
+            incoming_references,
+            indexes,
         }))
     }
 
@@ -537,24 +630,24 @@ impl Database {
             .ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)?;
         let exact = query.trim().to_ascii_uppercase();
         let mut statement = self.connection.prepare(
-            "SELECT t.id, t.version_id, t.modulo, t.nombre_tabla, t.descripcion,
+            "SELECT t.id, t.version_id, t.module, t.table_name, t.description,
                     t.source_url, t.object_type
-             FROM tablas t WHERE t.version_id = ?1 AND t.nombre_tabla = ?2
+             FROM tables t WHERE t.version_id = ?1 AND t.table_name = ?2
              UNION ALL
-             SELECT t.id, t.version_id, t.modulo, t.nombre_tabla, t.descripcion,
+             SELECT t.id, t.version_id, t.module, t.table_name, t.description,
                     t.source_url, t.object_type
-             FROM tablas_fts f JOIN tablas t ON t.id = f.tabla_id
-             WHERE f.version_id = ?1 AND tablas_fts MATCH ?3 AND t.nombre_tabla <> ?2
-             ORDER BY nombre_tabla LIMIT ?4",
+             FROM tables_fts f JOIN tables t ON t.id = f.table_id
+             WHERE f.version_id = ?1 AND tables_fts MATCH ?3 AND t.table_name <> ?2
+             ORDER BY table_name LIMIT ?4",
         )?;
         let fts_query = format!("\"{}\"*", query.replace('"', " "));
         let rows = statement.query_map(params![version.id, exact, fts_query, limit], |row| {
             Ok(TableRecord {
                 id: row.get(0)?,
                 version_id: row.get(1)?,
-                modulo: row.get(2)?,
-                nombre_tabla: row.get(3)?,
-                descripcion: row.get(4)?,
+                module: row.get(2)?,
+                table_name: row.get(3)?,
+                description: row.get(4)?,
                 source_url: row.get(5)?,
                 object_type: row.get(6)?,
             })
@@ -569,16 +662,16 @@ impl Database {
         let table = self
             .connection
             .query_row(
-                "SELECT id, version_id, modulo, nombre_tabla, descripcion, source_url, object_type
-                 FROM tablas WHERE version_id = ?1 AND nombre_tabla = upper(?2)",
+                "SELECT id, version_id, module, table_name, description, source_url, object_type
+                 FROM tables WHERE version_id = ?1 AND table_name = upper(?2)",
                 params![version.id, table_name],
                 |row| {
                     Ok(TableRecord {
                         id: row.get(0)?,
                         version_id: row.get(1)?,
-                        modulo: row.get(2)?,
-                        nombre_tabla: row.get(3)?,
-                        descripcion: row.get(4)?,
+                        module: row.get(2)?,
+                        table_name: row.get(3)?,
+                        description: row.get(4)?,
                         source_url: row.get(5)?,
                         object_type: row.get(6)?,
                     })
@@ -588,51 +681,49 @@ impl Database {
         let Some(table) = table else {
             return Ok(None);
         };
-        let columnas = self.query_columns(table.id)?;
-        let referencias_salientes =
-            self.query_references("WHERE tabla_origen_id = ?1", table.id)?;
-        let referencias_entrantes =
-            self.query_references("WHERE tabla_destino_id = ?1", table.id)?;
-        let mut indices = Vec::new();
+        let columns = self.query_columns(table.id)?;
+        let outgoing_references = self.query_references("WHERE source_table_id = ?1", table.id)?;
+        let incoming_references = self.query_references("WHERE target_table_id = ?1", table.id)?;
+        let mut indexes = Vec::new();
         let mut statement = self.connection.prepare(
-            "SELECT id, tabla_id, nombre_indice, columnas_indexadas, es_unico
-             FROM indices WHERE tabla_id = ?1 ORDER BY nombre_indice",
+            "SELECT id, table_id, index_name, indexed_columns, is_unique
+             FROM indexes WHERE table_id = ?1 ORDER BY index_name",
         )?;
         for row in statement.query_map(params![table.id], |row| {
             Ok(IndexRecord {
                 id: row.get(0)?,
-                tabla_id: row.get(1)?,
-                nombre_indice: row.get(2)?,
-                columnas_indexadas: row.get(3)?,
-                es_unico: row.get(4)?,
+                table_id: row.get(1)?,
+                index_name: row.get(2)?,
+                indexed_columns: row.get(3)?,
+                is_unique: row.get(4)?,
             })
         })? {
-            indices.push(row?);
+            indexes.push(row?);
         }
         Ok(Some(TableStructure {
-            tabla: table,
-            columnas,
-            referencias_salientes,
-            referencias_entrantes,
-            indices,
+            table: table,
+            columns,
+            outgoing_references,
+            incoming_references,
+            indexes,
         }))
     }
 
     fn query_columns(&self, table_id: i64) -> SqlResult<Vec<ColumnRecord>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, tabla_id, nombre_columna, tipo_datos, longitud, nullable, descripcion
-             FROM columnas WHERE tabla_id = ?1 ORDER BY id",
+            "SELECT id, table_id, column_name, data_type, length, nullable, description
+             FROM columns WHERE table_id = ?1 ORDER BY id",
         )?;
         let rows = statement
             .query_map(params![table_id], |row| {
                 Ok(ColumnRecord {
                     id: row.get(0)?,
-                    tabla_id: row.get(1)?,
-                    nombre_columna: row.get(2)?,
-                    tipo_datos: row.get(3)?,
-                    longitud: row.get(4)?,
+                    table_id: row.get(1)?,
+                    column_name: row.get(2)?,
+                    data_type: row.get(3)?,
+                    length: row.get(4)?,
                     nullable: row.get(5)?,
-                    descripcion: row.get(6)?,
+                    description: row.get(6)?,
                 })
             })?
             .collect();
@@ -641,9 +732,9 @@ impl Database {
 
     fn query_references(&self, condition: &str, table_id: i64) -> SqlResult<Vec<ReferenceRecord>> {
         let sql = format!(
-            "SELECT id, tabla_origen_id, columna_origen, tabla_destino_id,
-                    columna_destino, nombre_constraint
-             FROM referencias {} ORDER BY id",
+            "SELECT id, source_table_id, source_column, target_table_id,
+                    target_column, constraint_name
+             FROM foreign_key_references {} ORDER BY id",
             condition
         );
         let mut statement = self.connection.prepare(&sql)?;
@@ -651,11 +742,11 @@ impl Database {
             .query_map(params![table_id], |row| {
                 Ok(ReferenceRecord {
                     id: row.get(0)?,
-                    tabla_origen_id: row.get(1)?,
-                    columna_origen: row.get(2)?,
-                    tabla_destino_id: row.get(3)?,
-                    columna_destino: row.get(4)?,
-                    nombre_constraint: row.get(5)?,
+                    source_table_id: row.get(1)?,
+                    source_column: row.get(2)?,
+                    target_table_id: row.get(3)?,
+                    target_column: row.get(4)?,
+                    constraint_name: row.get(5)?,
                 })
             })?
             .collect();
@@ -667,25 +758,25 @@ impl Database {
             .active_version()?
             .ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)?;
         let mut statement = self.connection.prepare(
-            "SELECT r.id, r.tabla_origen_id, r.columna_origen, r.tabla_destino_id,
-                    r.columna_destino, r.nombre_constraint
-             FROM referencias r
-             JOIN tablas source ON source.id = r.tabla_origen_id
-             JOIN tablas target ON target.id = r.tabla_destino_id
+            "SELECT r.id, r.source_table_id, r.source_column, r.target_table_id,
+                    r.target_column, r.constraint_name
+             FROM foreign_key_references r
+             JOIN tables source ON source.id = r.source_table_id
+             JOIN tables target ON target.id = r.target_table_id
              WHERE source.version_id = ?1
-               AND ((source.nombre_tabla = upper(?2) AND target.nombre_tabla = upper(?3))
-                 OR (source.nombre_tabla = upper(?3) AND target.nombre_tabla = upper(?2)))
+               AND ((source.table_name = upper(?2) AND target.table_name = upper(?3))
+                 OR (source.table_name = upper(?3) AND target.table_name = upper(?2)))
              ORDER BY r.id",
         )?;
         let rows = statement
             .query_map(params![version.id, left, right], |row| {
                 Ok(ReferenceRecord {
                     id: row.get(0)?,
-                    tabla_origen_id: row.get(1)?,
-                    columna_origen: row.get(2)?,
-                    tabla_destino_id: row.get(3)?,
-                    columna_destino: row.get(4)?,
-                    nombre_constraint: row.get(5)?,
+                    source_table_id: row.get(1)?,
+                    source_column: row.get(2)?,
+                    target_table_id: row.get(3)?,
+                    target_column: row.get(4)?,
+                    constraint_name: row.get(5)?,
                 })
             })?
             .collect();
@@ -699,43 +790,103 @@ mod tests {
 
     fn sample_table(name: &str) -> CatalogTable {
         CatalogTable {
-            modulo: "Finance".to_owned(),
-            nombre_tabla: name.to_owned(),
-            descripcion: Some("Entidad de prueba".to_owned()),
+            module: "Finance".to_owned(),
+            table_name: name.to_owned(),
+            description: Some("Test entity".to_owned()),
             source_url: Some("https://docs.oracle.com/example.html".to_owned()),
             object_type: Some("TABLE".to_owned()),
-            columnas: vec![CatalogColumn {
-                nombre_columna: "ID".to_owned(),
-                tipo_datos: "NUMBER".to_owned(),
-                longitud: Some(18),
+            columns: vec![CatalogColumn {
+                column_name: "ID".to_owned(),
+                data_type: "NUMBER".to_owned(),
+                length: Some(18),
                 nullable: false,
-                descripcion: Some("Identificador".to_owned()),
+                description: Some("Identifier".to_owned()),
             }],
             ..CatalogTable::default()
         }
     }
 
     #[test]
-    fn crea_esquema_y_recupera_estructura() {
-        let db = Database::in_memory().expect("sqlite en memoria");
+    fn creates_schema_and_retrieves_structure() {
+        let db = Database::in_memory().expect("in-memory SQLite");
         let version_id = db.create_version("26B", true).expect("release");
         db.upsert_catalog_table(version_id, &sample_table("PO_HEADERS_ALL"))
-            .expect("tabla");
+            .expect("table");
         let structure = db
             .table_structure("PO_HEADERS_ALL")
-            .expect("consulta")
-            .expect("tabla existente");
-        assert_eq!(structure.tabla.nombre_tabla, "PO_HEADERS_ALL");
-        assert_eq!(structure.columnas[0].tipo_datos, "NUMBER");
+            .expect("query")
+            .expect("existing table");
+        assert_eq!(structure.table.table_name, "PO_HEADERS_ALL");
+        assert_eq!(structure.columns[0].data_type, "NUMBER");
     }
 
     #[test]
-    fn prioriza_nombre_exacto_en_busqueda() {
-        let db = Database::in_memory().expect("sqlite en memoria");
+    fn prioritizes_exact_name_in_search() {
+        let db = Database::in_memory().expect("in-memory SQLite");
         let version_id = db.create_version("26B", true).expect("release");
         db.upsert_catalog_table(version_id, &sample_table("AP_INVOICES_ALL"))
-            .expect("tabla");
-        let matches = db.search_tables("AP_INVOICES_ALL", 10).expect("búsqueda");
-        assert_eq!(matches[0].nombre_tabla, "AP_INVOICES_ALL");
+            .expect("table");
+        let matches = db.search_tables("AP_INVOICES_ALL", 10).expect("search");
+        assert_eq!(matches[0].table_name, "AP_INVOICES_ALL");
+    }
+
+    #[test]
+    fn migrates_legacy_spanish_schema() {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE tabla_versiones (
+                    id INTEGER PRIMARY KEY,
+                    release_code TEXT NOT NULL UNIQUE,
+                    fecha_sincronizacion TEXT NOT NULL,
+                    activo_bool INTEGER NOT NULL
+                );
+                CREATE TABLE tablas (
+                    id INTEGER PRIMARY KEY,
+                    version_id INTEGER NOT NULL,
+                    modulo TEXT NOT NULL,
+                    nombre_tabla TEXT NOT NULL,
+                    descripcion TEXT,
+                    source_url TEXT,
+                    object_type TEXT
+                );
+                CREATE TABLE columnas (
+                    id INTEGER PRIMARY KEY,
+                    tabla_id INTEGER NOT NULL,
+                    nombre_columna TEXT NOT NULL,
+                    tipo_datos TEXT NOT NULL,
+                    longitud INTEGER,
+                    nullable INTEGER NOT NULL,
+                    descripcion TEXT
+                );
+                CREATE TABLE referencias (
+                    id INTEGER PRIMARY KEY,
+                    tabla_origen_id INTEGER NOT NULL,
+                    columna_origen TEXT NOT NULL,
+                    tabla_destino_id INTEGER NOT NULL,
+                    columna_destino TEXT NOT NULL,
+                    nombre_constraint TEXT
+                );
+                CREATE TABLE indices (
+                    id INTEGER PRIMARY KEY,
+                    tabla_id INTEGER NOT NULL,
+                    nombre_indice TEXT NOT NULL,
+                    columnas_indexadas TEXT NOT NULL,
+                    es_unico INTEGER NOT NULL
+                );
+                ",
+            )
+            .expect("legacy schema");
+        let db = Database { connection };
+        db.migrate().expect("schema migration");
+        assert!(db.table_exists("versions").expect("versions table"));
+        assert!(db
+            .column_exists("tables", "table_name")
+            .expect("table name"));
+        assert!(db.column_exists("columns", "data_type").expect("data type"));
+        assert!(db
+            .table_exists("foreign_key_references")
+            .expect("references table"));
     }
 }

@@ -1,39 +1,39 @@
-# Fuentes oficiales de tablas Oracle Fusion Cloud
+# Official Oracle Fusion Cloud Table Sources
 
-## Propósito
+## Purpose
 
-Este documento define las URLs oficiales que leerá el extractor del servidor MCP
-para construir el diccionario técnico de Oracle Fusion Cloud Financials y Supply
-Chain & Manufacturing (SCM).
+This document defines the official URLs that the MCP server extractor reads to
+build the Oracle Fusion Cloud Financials and Supply Chain & Manufacturing (SCM)
+technical dictionary.
 
-Oracle no publica una única URL estable con todas las tablas. Cada release tiene
-un índice `Tables and Views` y páginas individuales para cada tabla o vista. El
-extractor debe leer primero el índice, descubrir los enlaces y después obtener
-cada página individual.
+Oracle does not publish a single stable URL containing all tables. Each release
+has a `Tables and Views` index and individual pages for each table or view. The
+extractor must read the index first, discover the links, and then fetch each
+individual page.
 
 ## Financials
 
-### Índice por release
+### Per-release index
 
 ```text
 https://docs.oracle.com/en/cloud/saas/financials/{release}/oedmf/index.html
 ```
 
-Ejemplos:
+Examples:
 
 - [Financials 26B](https://docs.oracle.com/en/cloud/saas/financials/26b/oedmf/index.html)
 - [Financials 26C](https://docs.oracle.com/en/cloud/saas/financials/26c/oedmf/index.html)
 - [Financials 26D](https://docs.oracle.com/en/cloud/saas/financials/26d/oedmf/index.html)
 
-### Página de tabla o vista
+### Table or view page
 
-El enlace individual descubierto en el índice sigue normalmente este patrón:
+The individual link discovered in the index usually follows this pattern:
 
 ```text
 https://docs.oracle.com/en/cloud/saas/financials/{release}/oedmf/{slug}-{id}.html
 ```
 
-Ejemplos verificables en 26B:
+Examples verified in 26B:
 
 - [GL_BALANCES](https://docs.oracle.com/en/cloud/saas/financials/26b/oedmf/glbalances-24959.html)
 - [FA_ADDITIONS_B](https://docs.oracle.com/en/cloud/saas/financials/26b/oedmf/faadditionsb-6728.html)
@@ -41,68 +41,68 @@ Ejemplos verificables en 26B:
 - [GL_SETS_OF_BOOKS](https://docs.oracle.com/en/cloud/saas/financials/26b/oedmf/glsetsofbooks-6695.html)
 - [ZX_LINES_V](https://docs.oracle.com/en/cloud/saas/financials/26b/oedmf/zxlinesv-5233.html)
 
-Cada página puede contener descripción, tipo de objeto, columnas, claves,
-foreign keys, índices y, para vistas, la consulta SQL.
+Each page may contain a description, object type, columns, keys, foreign keys,
+indexes, and, for views, the SQL query.
 
 ## Supply Chain & Manufacturing (SCM)
 
-### Índice por release
+### Per-release index
 
 ```text
 https://docs.oracle.com/en/cloud/saas/supply-chain-and-manufacturing/{release}/oedsc/index.html
 ```
 
-Ejemplos:
+Examples:
 
 - [SCM 26B overview](https://docs.oracle.com/en/cloud/saas/supply-chain-and-manufacturing/26b/oedsc/overview.html)
 - [SCM 26C overview](https://docs.oracle.com/en/cloud/saas/supply-chain-and-manufacturing/26c/oedsc/overview.html)
 - [SCM 25D index](https://docs.oracle.com/en/cloud/saas/supply-chain-and-manufacturing/25d/oedsc/index.html)
 
-### Página de tabla o vista
+### Table or view page
 
-El enlace individual descubierto en el índice sigue normalmente este patrón:
+The individual link discovered in the index usually follows this pattern:
 
 ```text
 https://docs.oracle.com/en/cloud/saas/supply-chain-and-manufacturing/{release}/oedsc/{slug}-{id}.html
 ```
 
-Ejemplos verificables en 26B:
+Examples verified in 26B:
 
 - [INV_ONHAND_SUP_SUMMARY_V](https://docs.oracle.com/en/cloud/saas/supply-chain-and-manufacturing/26b/oedsc/invonhandsupsummaryv-7500.html)
 - [MSC_BOMS_V](https://docs.oracle.com/en/cloud/saas/supply-chain-and-manufacturing/26b/oedsc/mscbomsv-4644.html)
 
-El índice SCM documenta tablas físicas, columnas, claves primarias e índices,
-además de vistas y sus consultas SQL.
+The SCM index documents physical tables, columns, primary keys, and indexes,
+as well as views and their SQL queries.
 
-## Regla de descubrimiento para el extractor
+## Extractor discovery rule
 
-1. Resolver `{release}` desde la configuración de sincronización, por ejemplo
+1. Resolve `{release}` from the synchronization configuration, for example
    `26b`.
-2. Descargar el índice de Financials y/o SCM.
-3. Extraer únicamente enlaces bajo el mismo release y guía (`oedmf` u `oedsc`).
-4. Descargar cada página enlazada y normalizar tablas, columnas, constraints e
-   índices.
-5. Guardar la URL original y el release junto con cada entidad para mantener
-   trazabilidad.
-6. Rechazar enlaces fuera de `docs.oracle.com` o fuera del prefijo del release.
+2. Download the Financials and/or SCM index.
+3. Extract only links under the same release and guide (`oedmf` or `oedsc`).
+4. Download each linked page and normalize tables, columns, constraints, and
+   indexes.
+5. Store the original URL and release with each entity to maintain
+   traceability.
+6. Reject links outside `docs.oracle.com` or outside the release prefix.
 
-## Fuente histórica OER
+## Historical OER source
 
-Oracle indica que el contenido anterior de Oracle Enterprise Repository fue
-trasladado a Oracle Help Center, My Oracle Support o Setup and Maintenance:
+Oracle states that the former Oracle Enterprise Repository content was moved to
+Oracle Help Center, My Oracle Support, or Setup and Maintenance:
 
-- [Redirección oficial de OER](https://www.oracle.com/webfolder/technetwork/docs/HTML/oer-redirect.html)
+- [Official OER redirect](https://www.oracle.com/webfolder/technetwork/docs/HTML/oer-redirect.html)
 
-Por tanto, `https://oracle.com[VERSION]/api/html/` no debe tratarse como una
-URL operativa confirmada. El adaptador debe conservarla como configuración
-opcional, pero usar los índices de Oracle Help Center como fuente por defecto.
+Therefore, `https://oracle.com[VERSION]/api/html/` must not be treated as a
+confirmed operational URL. The adapter should retain it as optional
+configuration, but use the Oracle Help Center indexes as the default source.
 
-## Fuentes que no deben confundirse
+## Sources that must not be confused
 
-- Las guías `oedmf` y `oedsc` describen tablas y vistas de Fusion Cloud para
-  consultas técnicas.
-- Las guías de **Fusion ERP Analytics** y **Fusion SCM Analytics** describen
-  modelos analíticos, no necesariamente las tablas físicas disponibles para
+- The `oedmf` and `oedsc` guides describe Fusion Cloud tables and views for
+  technical queries.
+- The **Fusion ERP Analytics** and **Fusion SCM Analytics** guides describe
+  analytical models, not necessarily the physical tables available for
   BI Publisher.
-- El extractor debe almacenar el tipo de objeto (`TABLE` o `VIEW`) y no
-  presentar una vista como si fuera una tabla física.
+- The extractor must store the object type (`TABLE` or `VIEW`) and must not
+  present a view as a physical table.

@@ -42,7 +42,7 @@ async fn main() -> io::Result<()> {
     let database = match Database::open(&database_path) {
         Ok(database) => database,
         Err(error) => {
-            eprintln!("no se pudo abrir SQLite: {error}");
+            eprintln!("could not open SQLite: {error}");
             return Err(io::Error::new(io::ErrorKind::Other, error.to_string()));
         }
     };
@@ -59,7 +59,7 @@ async fn main() -> io::Result<()> {
             Err(error) => error_response(
                 None,
                 -32700,
-                "JSON inválido",
+                "invalid JSON",
                 Some(json!({ "detail": error.to_string() })),
             ),
         };
@@ -76,7 +76,7 @@ async fn main() -> io::Result<()> {
 
 fn handle_request(database: &Database, request: JsonRpcRequest) -> JsonRpcResponse {
     if request.jsonrpc != "2.0" {
-        return error_response(request.id, -32600, "jsonrpc debe ser 2.0", None);
+        return error_response(request.id, -32600, "jsonrpc must be 2.0", None);
     }
     match request.method.as_str() {
         "initialize" => success(
@@ -94,7 +94,7 @@ fn handle_request(database: &Database, request: JsonRpcRequest) -> JsonRpcRespon
             Err(error) => error_response(request.id, -32602, &error, None),
         },
         _ if request.id.is_none() => success(None, json!({})),
-        _ => error_response(request.id, -32601, "método no soportado", None),
+        _ => error_response(request.id, -32601, "method not supported", None),
     }
 }
 
@@ -103,34 +103,34 @@ fn tool_definitions() -> Value {
         "tools": [
             {
                 "name": "listar_modulos_y_tablas",
-                "description": "Lista tablas del release activo, opcionalmente filtradas por módulo.",
+                "description": "Lists tables from the active release, optionally filtered by module.",
                 "inputSchema": {
                     "type": "object",
-                    "properties": { "modulo": { "type": "string" } }
+                    "properties": { "module": { "type": "string" } }
                 }
             },
             {
                 "name": "buscar_estructura_tabla",
-                "description": "Busca una tabla exacta o por texto y devuelve su estructura técnica.",
+                "description": "Searches for an exact table or by text and returns its technical structure.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "nombre": { "type": "string" },
-                        "limite": { "type": "integer", "minimum": 1, "maximum": 100 }
+                        "name": { "type": "string" },
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 100 }
                     },
-                    "required": ["nombre"]
+                    "required": ["name"]
                 }
             },
             {
                 "name": "sugerir_joins",
-                "description": "Devuelve las relaciones exactas entre dos tablas.",
+                "description": "Returns the exact relationships between two tables.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "tabla_a": { "type": "string" },
-                        "tabla_b": { "type": "string" }
+                        "table_a": { "type": "string" },
+                        "table_b": { "type": "string" }
                     },
-                    "required": ["tabla_a", "tabla_b"]
+                    "required": ["table_a", "table_b"]
                 }
             }
         ]
@@ -141,14 +141,14 @@ fn call_tool(database: &Database, params: &Value) -> Result<Value, String> {
     let name = params
         .get("name")
         .and_then(Value::as_str)
-        .ok_or("tools/call requiere name")?;
+        .ok_or("tools/call requires name")?;
     let arguments = params
         .get("arguments")
         .cloned()
         .unwrap_or_else(|| json!({}));
     match name {
         "listar_modulos_y_tablas" => {
-            let module = arguments.get("modulo").and_then(Value::as_str);
+            let module = arguments.get("module").and_then(Value::as_str);
             let tables = database
                 .list_modules_and_tables(module)
                 .map_err(|error| error.to_string())?;
@@ -157,7 +157,7 @@ fn call_tool(database: &Database, params: &Value) -> Result<Value, String> {
             ))
         }
         "buscar_estructura_tabla" => {
-            let query = required_string(&arguments, "nombre")?;
+            let query = required_string(&arguments, "name")?;
             if let Some(structure) = database
                 .table_structure(&query)
                 .map_err(|error| error.to_string())?
@@ -167,7 +167,7 @@ fn call_tool(database: &Database, params: &Value) -> Result<Value, String> {
                 ));
             }
             let limit = arguments
-                .get("limite")
+                .get("limit")
                 .and_then(Value::as_u64)
                 .unwrap_or(10)
                 .clamp(1, 100) as usize;
@@ -179,8 +179,8 @@ fn call_tool(database: &Database, params: &Value) -> Result<Value, String> {
             ))
         }
         "sugerir_joins" => {
-            let left = required_string(&arguments, "tabla_a")?;
-            let right = required_string(&arguments, "tabla_b")?;
+            let left = required_string(&arguments, "table_a")?;
+            let right = required_string(&arguments, "table_b")?;
             let references = database
                 .suggest_joins(&left, &right)
                 .map_err(|error| error.to_string())?;
@@ -188,7 +188,7 @@ fn call_tool(database: &Database, params: &Value) -> Result<Value, String> {
                 serde_json::to_value(references).map_err(|e| e.to_string())?,
             ))
         }
-        _ => Err(format!("herramienta no soportada: {name}")),
+        _ => Err(format!("tool not supported: {name}")),
     }
 }
 
@@ -199,7 +199,7 @@ fn required_string(arguments: &Value, key: &str) -> Result<String, String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
-        .ok_or_else(|| format!("argumento requerido: {key}"))
+        .ok_or_else(|| format!("required argument: {key}"))
 }
 
 fn tool_result(value: Value) -> Value {

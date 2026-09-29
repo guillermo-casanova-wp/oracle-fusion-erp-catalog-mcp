@@ -1,37 +1,37 @@
 # Oracle ERP MCP
 
-Servidor MCP en Rust para consultar el diccionario técnico de Oracle Fusion
-Cloud Financials y SCM mediante SQLite y FTS5.
+Rust MCP server for querying the Oracle Fusion Cloud Financials and SCM
+technical dictionary through SQLite and FTS5.
 
 ## Estado
 
-Incluye:
+Includes:
 
-- Esquema versionado de tablas, columnas, referencias e índices.
-- Clonación entre releases y selección de una versión activa.
-- Búsqueda exacta y léxica con FTS5.
-- Extractor configurable para índices HTML, JSON y XML del Oracle Help Center.
-- Cálculo de delta entre dos releases.
-- Transporte JSON-RPC 2.0 por stdin/stdout y las herramientas:
+- Versioned schema for tables, columns, references, and indexes.
+- Cloning between releases and selection of an active version.
+- Exact and lexical search with FTS5.
+- Configurable extractor for HTML, JSON, and XML indexes from Oracle Help Center.
+- Delta calculation between two releases.
+- JSON-RPC 2.0 transport over stdin/stdout and the following tools:
   `listar_modulos_y_tablas`, `buscar_estructura_tabla` y `sugerir_joins`.
 
-Las fuentes oficiales y sus patrones están en
+The official sources and their patterns are documented in
 [`docs/oracle-table-sources.md`](docs/oracle-table-sources.md).
 
-## Ejecutar
+## Running
 
-Requiere Rust estable (`cargo` y `rustc`) instalado.
+Requires stable Rust (`cargo` and `rustc`) to be installed.
 
 ```sh
 cargo run --release
 ```
 
-La ruta de SQLite se configura con `ORACLE_MCP_DATABASE`; por defecto es
+The SQLite path is configured with `ORACLE_MCP_DATABASE`; the default is
 `oracle-erp-mcp.sqlite`.
 
-Los logs se escriben en stderr. stdout queda reservado para mensajes MCP.
+Logs are written to stderr. stdout is reserved for MCP messages.
 
-## Ejemplo de inicialización
+## Initialization example
 
 ```sh
 printf '%s\n' \
@@ -40,7 +40,7 @@ printf '%s\n' \
   | cargo run --quiet
 ```
 
-## Verificación
+## Verification
 
 ```sh
 cargo fmt --all -- --check

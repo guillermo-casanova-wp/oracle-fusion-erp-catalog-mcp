@@ -2,30 +2,30 @@
 
 ## Scope
 
-Estas instrucciones aplican a todo el proyecto.
+These instructions apply to the entire project.
 
-## Arquitectura
+## Architecture
 
-- `src/main.rs`: transporte MCP JSON-RPC 2.0 por stdin/stdout.
-- `src/db.rs`: modelos, esquema SQLite, FTS5 y consultas.
-- `src/sync.rs`: extracción Oracle, sincronización trimestral y diff.
-- `docs/`: fuentes oficiales y decisiones de integración.
+- `src/main.rs`: MCP JSON-RPC 2.0 transport over stdin/stdout.
+- `src/db.rs`: models, SQLite schema, FTS5, and queries.
+- `src/sync.rs`: Oracle extraction, quarterly synchronization, and diffs.
+- `docs/`: official sources and integration decisions.
 
-## Convenciones
+## Conventions
 
-- Usar Rust estable, `cargo fmt` y `cargo test` antes de entregar cambios.
-- Propagar errores con `Result`; el servidor no debe usar `panic!`, `unwrap()` ni
-  `expect()` en el flujo de producción.
-- Mantener stdout exclusivamente para mensajes MCP; enviar logs a stderr.
-- No inventar nombres de tablas, columnas, constraints o URLs Oracle.
-- Toda metadata debe conservar release, módulo y URL de origen cuando exista.
-- Las consultas deben limitarse a la versión activa salvo que una función
-  indique explícitamente otra versión.
-- Sanitizar términos antes de construir consultas FTS5.
+- Use stable Rust, `cargo fmt`, and `cargo test` before delivering changes.
+- Propagate errors with `Result`; the server must not use `panic!`, `unwrap()`, or
+  `expect()` in production code paths.
+- Keep stdout exclusively for MCP messages; send logs to stderr.
+- Do not invent Oracle table names, column names, constraints, or URLs.
+- All metadata must retain the release, module, and source URL when available.
+- Queries must be limited to the active version unless a function explicitly
+  specifies another version.
+- Sanitize terms before building FTS5 queries.
 
-## Verificación
+## Verification
 
-Ejecutar:
+Run:
 
 ```sh
 cargo fmt --all -- --check
@@ -33,4 +33,4 @@ cargo check
 cargo test
 ```
 
-Los cambios en el esquema SQLite deben incluir o actualizar pruebas unitarias.
+Changes to the SQLite schema must include or update unit tests.
