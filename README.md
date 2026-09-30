@@ -85,13 +85,13 @@ Available tools:
 
 | Tool | Description |
 | --- | --- |
-| `list_modules_and_tables` | Lista las tablas de la release activa, opcionalmente por módulo. |
-| `search_table_structure` | Busca una tabla y devuelve su estructura técnica. |
-| `suggest_joins` | Devuelve relaciones directas entre dos tablas. |
-| `find_tables_by_column` | Encuentra tablas que contienen una columna. |
-| `search_columns` | Busca columnas por nombre o descripción. |
-| `find_related_tables` | Encuentra tablas relacionadas mediante claves foráneas. |
-| `list_releases` | Lista las releases sincronizadas e identifica la activa. |
+| `list_modules_and_tables` | Lists tables from the active release, optionally filtered by module. |
+| `search_table_structure` | Searches for a table and returns its technical structure. |
+| `suggest_joins` | Returns direct relationships between two tables. |
+| `find_tables_by_column` | Finds tables containing a column. |
+| `search_columns` | Searches columns by name or description. |
+| `find_related_tables` | Finds tables related through foreign keys. |
+| `list_releases` | Lists synchronized releases and identifies the active one. |
 
 ## Setup dev environment
 
