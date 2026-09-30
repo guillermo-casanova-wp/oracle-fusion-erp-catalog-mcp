@@ -56,11 +56,6 @@ command -v gh >/dev/null 2>&1 || {
     echo "error: GitHub CLI (gh) is required" >&2
     exit 1
 }
-command -v cargo >/dev/null 2>&1 || {
-    echo "error: cargo is required" >&2
-    exit 1
-}
-
 branch=$(git branch --show-current)
 [ "$branch" = "main" ] || {
     echo "error: releases must start from main, current branch is $branch" >&2
@@ -86,11 +81,6 @@ git diff --quiet HEAD origin/main || {
     echo "error: local main is not synchronized with origin/main" >&2
     exit 1
 }
-
-echo "Running formatting, lint, and tests..."
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace
 
 if [ "$dry_run" = true ]; then
     echo "Dry run: would trigger Release workflow for v$version"

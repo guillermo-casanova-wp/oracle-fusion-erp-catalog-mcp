@@ -65,9 +65,9 @@ Run the complete release workflow from an up-to-date `main` branch:
 scripts/release.sh 0.2.0
 ```
 
-The script validates the version, runs formatting, Clippy, and tests, triggers
-the GitHub Actions release workflow, waits for completion, and prints the
-published release URL. Preview the checks and workflow trigger without
+The script validates the version and branch state, triggers the GitHub Actions
+release workflow, waits for completion, and prints the published release URL.
+The workflow runs the project checks. Preview the workflow trigger without
 publishing with:
 
 ```sh
