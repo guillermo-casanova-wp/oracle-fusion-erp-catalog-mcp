@@ -1,5 +1,6 @@
 use crate::db::{CatalogTable, Database};
 use anyhow::{anyhow, Context, Result};
+use indicatif::ProgressBar;
 use reqwest::Client;
 use scraper::{Html, Selector};
 use serde::Deserialize;
@@ -80,6 +81,14 @@ impl OracleExtractor {
     }
 
     pub async fn extract(&self, source: &OracleSource) -> Result<Vec<CatalogTable>> {
+        self.extract_with_progress(source, None).await
+    }
+
+    pub async fn extract_with_progress(
+        &self,
+        source: &OracleSource,
+        progress: Option<&ProgressBar>,
+    ) -> Result<Vec<CatalogTable>> {
         let response = self
             .client
             .get(source.index_url.clone())
@@ -101,13 +110,14 @@ impl OracleExtractor {
         if content_type.contains("xml") || bytes.starts_with(b"<?xml") {
             return parse_xml_catalog(&bytes);
         }
-        self.extract_html_guide(&bytes, source).await
+        self.extract_html_guide(&bytes, source, progress).await
     }
 
     async fn extract_html_guide(
         &self,
         initial_payload: &[u8],
         source: &OracleSource,
+        progress: Option<&ProgressBar>,
     ) -> Result<Vec<CatalogTable>> {
         let next_selector = Selector::parse(r#"link[rel="next"]"#)
             .map_err(|error| anyhow!("invalid selector: {error}"))?;
@@ -130,11 +140,16 @@ impl OracleExtractor {
                 tables.push(table);
             }
             if page_number > 0 && page_number % 100 == 0 {
-                eprintln!(
+                let message = format!(
                     "processed {} Oracle guide pages and {} tables",
                     page_number,
                     tables.len()
                 );
+                if let Some(progress) = progress {
+                    progress.set_message(message);
+                } else {
+                    eprintln!("{message}");
+                }
             }
 
             let document = Html::parse_document(
@@ -331,9 +346,22 @@ fn is_superior_release(candidate: &str, current: &str) -> Result<bool> {
 pub fn synchronize(
     db: &Database,
     release: &str,
-    mut tables: Vec<CatalogTable>,
+    tables: Vec<CatalogTable>,
     activate: bool,
 ) -> Result<i64> {
+    synchronize_with_progress(db, release, tables, activate, |_, _| {})
+}
+
+pub fn synchronize_with_progress<F>(
+    db: &Database,
+    release: &str,
+    mut tables: Vec<CatalogTable>,
+    activate: bool,
+    mut on_progress: F,
+) -> Result<i64>
+where
+    F: FnMut(usize, usize),
+{
     let release = release.trim().to_ascii_uppercase();
     parse_release_code(&release)?;
     let previous = db.active_version()?;
@@ -382,8 +410,10 @@ pub fn synchronize(
         skeleton.indexes.clear();
         db.upsert_catalog_table(version_id, &skeleton)?;
     }
-    for table in &tables {
+    let total_tables = tables.len();
+    for (index, table) in tables.iter().enumerate() {
         db.upsert_catalog_table(version_id, table)?;
+        on_progress(index + 1, total_tables);
     }
     db.rebuild_fts(version_id)?;
     if activate {
@@ -479,6 +509,23 @@ mod tests {
                 .expect("new version")
                 .active
         );
+    }
+
+    #[test]
+    fn reports_progress_for_each_imported_table() {
+        let db = Database::in_memory().expect("in-memory SQLite");
+        let tables = vec![
+            catalog_table("SCM", "FIRST_TABLE"),
+            catalog_table("SCM", "SECOND_TABLE"),
+        ];
+        let mut progress = Vec::new();
+
+        synchronize_with_progress(&db, "26B", tables, true, |completed, total| {
+            progress.push((completed, total));
+        })
+        .expect("synchronize");
+
+        assert_eq!(progress, vec![(1, 2), (2, 2)]);
     }
 
     #[test]

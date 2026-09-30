@@ -21,18 +21,39 @@ Center remain subject to Oracle's terms.
 
 ## Install
 
-The installer downloads a GitHub Release binary without sudo and places it in
-`$HOME/.local/bin` (on this machine, `/Users/jer.ioet/.local/bin`). The
-repository does not yet have a configured GitHub remote, so provide the future
-owner and repository:
+Install the latest release without Rust or `sudo`:
 
 ```sh
-GITHUB_OWNER=YOUR_ORG GITHUB_REPO=YOUR_REPO \
-  sh scripts/install.sh --version 0.1.0
+curl -fsSL \
+  https://raw.githubusercontent.com/thegreatyamori/oracle-fusion-erp-catalog-mcp/main/scripts/install.sh \
+  | sh
 ```
 
-The SQLite path is configured with `ORACLE_MCP_DATABASE`; the default is
-`oracle-erp-mcp.sqlite`.
+The installer places the binary in `$HOME/.local/bin`, detects the operating
+system and architecture, and asks where to register the MCP:
+
+1. Cursor
+2. Claude Code
+3. Codex CLI
+4. OpenCode
+5. All agents
+6. Binary only
+
+For a non-interactive installation, pass the agent choice through `sh -s`:
+
+```sh
+curl -fsSL \
+  https://raw.githubusercontent.com/thegreatyamori/oracle-fusion-erp-catalog-mcp/main/scripts/install.sh \
+  | sh -s -- --agent cursor
+```
+
+Use `--agent none` to install only the binary. Other useful options include
+`--version VERSION`, `--database PATH`, `--install-dir DIRECTORY`, and
+`--asset NAME`. Forks can override the release source with `--owner` and
+`--repo`.
+
+The SQLite path is configured with `ORACLE_MCP_DATABASE`; the installer defaults
+to `$PWD/oracle-fusion-erp-catalog-mcp.sqlite`.
 
 Logs are written to stderr. stdout is reserved for MCP messages.
 
@@ -77,6 +98,26 @@ printf '%s\n' \
 
 Available tools are `list_modules_and_tables`, `search_table_structure`, and
 `suggest_joins`.
+
+## Release packages
+
+Releases are built by GitHub Actions for macOS and Linux on x86_64 and
+aarch64. To publish a new version, open the `Release` workflow in GitHub
+Actions, choose **Run workflow**, and enter a version such as `0.2.0`.
+
+The workflow updates `Cargo.toml` and `Cargo.lock`, commits the release
+version to `main`, creates the matching `v0.2.0` tag, builds the four binaries,
+and publishes them with a `SHA256SUMS` file. Existing `v*` tags are also
+supported, but their version must already match `Cargo.toml`.
+
+The generated assets use the names consumed by the installer:
+
+```text
+oracle-fusion-erp-catalog-mcp-macos-x86_64
+oracle-fusion-erp-catalog-mcp-macos-aarch64
+oracle-fusion-erp-catalog-mcp-linux-x86_64
+oracle-fusion-erp-catalog-mcp-linux-aarch64
+```
 
 ## Setup dev environment
 

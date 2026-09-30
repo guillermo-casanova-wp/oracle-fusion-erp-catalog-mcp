@@ -6,24 +6,31 @@ usage() {
 Download and install the Oracle ERP MCP release binary.
 
 Usage: install.sh [--owner OWNER] [--repo REPOSITORY] [--version VERSION]
-                  [--install-dir DIRECTORY] [--asset NAME]
+                  [--install-dir DIRECTORY] [--asset NAME] [--database PATH]
+                  [--agent AGENT]
 
 Defaults:
-  --owner        GITHUB_OWNER, or OWNER (replace this placeholder)
-  --repo         GITHUB_REPO, or REPO (replace this placeholder)
+  --owner        thegreatyamori
+  --repo         oracle-fusion-erp-catalog-mcp
   --version      VERSION, or latest
   --install-dir  INSTALL_DIR, or $HOME/.local/bin
   --asset        ASSET_NAME, or REPOSITORY-OS-ARCH
+  --database     DATABASE, or $PWD/oracle-fusion-erp-catalog-mcp.sqlite
+  --agent        cursor, claude-code, codex, opencode, all, or none
 
 The release asset is expected to be a directly downloadable executable.
+Without --agent, the installer asks which agent should receive the MCP
+configuration when a terminal is available.
 EOF
 }
 
-owner=${GITHUB_OWNER:-OWNER}
-repo=${GITHUB_REPO:-REPO}
+owner=${GITHUB_OWNER:-thegreatyamori}
+repo=${GITHUB_REPO:-oracle-fusion-erp-catalog-mcp}
 version=${VERSION:-latest}
 install_dir=${INSTALL_DIR:-"${HOME:-}/.local/bin"}
 asset=${ASSET_NAME:-}
+database=${DATABASE:-"${PWD}/oracle-fusion-erp-catalog-mcp.sqlite"}
+agent=${AGENT:-}
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -32,13 +39,13 @@ while [ "$#" -gt 0 ]; do
         --version) [ "$#" -ge 2 ] || { echo "error: --version requires a value" >&2; exit 2; }; version=$2; shift 2 ;;
         --install-dir) [ "$#" -ge 2 ] || { echo "error: --install-dir requires a value" >&2; exit 2; }; install_dir=$2; shift 2 ;;
         --asset) [ "$#" -ge 2 ] || { echo "error: --asset requires a value" >&2; exit 2; }; asset=$2; shift 2 ;;
+        --database) [ "$#" -ge 2 ] || { echo "error: --database requires a value" >&2; exit 2; }; database=$2; shift 2 ;;
+        --agent) [ "$#" -ge 2 ] || { echo "error: --agent requires a value" >&2; exit 2; }; agent=$2; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) echo "error: unknown option: $1" >&2; usage >&2; exit 2 ;;
     esac
 done
 
-[ "$owner" != "OWNER" ] || { echo "error: configure GITHUB_OWNER or pass --owner" >&2; exit 1; }
-[ "$repo" != "REPO" ] || { echo "error: configure GITHUB_REPO or pass --repo" >&2; exit 1; }
 command -v curl >/dev/null 2>&1 || { echo "error: curl is required" >&2; exit 1; }
 command -v uname >/dev/null 2>&1 || { echo "error: uname is required" >&2; exit 1; }
 
@@ -71,6 +78,43 @@ if ! curl --fail --location --silent --show-error "$url" --output "$tmp"; then
     exit 1
 fi
 chmod 755 "$tmp"
-mv "$tmp" "${install_dir}/oracle-fusion-erp-catalog-mcp"
+binary="${install_dir}/oracle-fusion-erp-catalog-mcp"
+mv "$tmp" "$binary"
 trap - EXIT HUP INT TERM
-echo "Installed ${install_dir}/oracle-fusion-erp-catalog-mcp"
+echo "Installed ${binary}"
+
+if [ -z "$agent" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    printf '%s\n' \
+        "Where should the MCP be installed?" \
+        "  1) Cursor" \
+        "  2) Claude Code" \
+        "  3) Codex CLI" \
+        "  4) OpenCode" \
+        "  5) All" \
+        "  6) None (binary only)" >&2
+    printf 'Choose [1-6] (default: 1): ' >&2
+    read -r choice </dev/tty || choice=1
+    case "$choice" in
+        1|"") agent=cursor ;;
+        2) agent=claude-code ;;
+        3) agent=codex ;;
+        4) agent=opencode ;;
+        5) agent=all ;;
+        6) agent=none ;;
+        *) echo "error: choose a number from 1 to 6" >&2; exit 2 ;;
+    esac
+fi
+
+agent=${agent:-none}
+case "$agent" in
+    cursor|claude-code|codex|opencode|all)
+        "$binary" install "$agent" --binary "$binary" --database "$database"
+        ;;
+    none)
+        echo "Skipped agent configuration."
+        ;;
+    *)
+        echo "error: unsupported agent '$agent'; use cursor, claude-code, codex, opencode, all, or none" >&2
+        exit 2
+        ;;
+esac

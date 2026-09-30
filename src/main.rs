@@ -1,6 +1,9 @@
+use indicatif::{ProgressBar, ProgressStyle};
 use oracle_fusion_erp_catalog_mcp::db::Database;
 use oracle_fusion_erp_catalog_mcp::install;
-use oracle_fusion_erp_catalog_mcp::sync::{self, synchronize, OracleExtractor, OracleModule};
+use oracle_fusion_erp_catalog_mcp::sync::{
+    self, synchronize_with_progress, OracleExtractor, OracleModule,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{env, io};
@@ -108,7 +111,18 @@ async fn run_sync_command(args: &[String]) -> anyhow::Result<()> {
     for module in modules {
         let source = sync::OracleSource::help_center(module, &release)?;
         eprintln!("downloading {} {}", module.label(), source.index_url);
-        let extracted = extractor.extract(&source).await?;
+        let extraction_progress = ProgressBar::new_spinner();
+        extraction_progress.set_style(
+            ProgressStyle::with_template("{spinner} {msg}")
+                .unwrap_or_else(|_| ProgressStyle::default_spinner()),
+        );
+        extraction_progress.enable_steady_tick(std::time::Duration::from_millis(100));
+        extraction_progress.set_message(format!("processing {} Oracle guide", module.label()));
+        let extracted_result = extractor
+            .extract_with_progress(&source, Some(&extraction_progress))
+            .await;
+        extraction_progress.finish_and_clear();
+        let extracted = extracted_result?;
         eprintln!(
             "extracted {} catalog entries from {}",
             extracted.len(),
@@ -120,7 +134,22 @@ async fn run_sync_command(args: &[String]) -> anyhow::Result<()> {
     if replace {
         database.delete_version_by_release(&release)?;
     }
-    let version_id = synchronize(&database, &release, tables, activate)?;
+    let import_progress = ProgressBar::new(tables.len() as u64);
+    import_progress.set_style(
+        ProgressStyle::with_template("{prefix} {bar:40.cyan/blue} {pos}/{len} {msg}")
+            .unwrap_or_else(|_| ProgressStyle::default_bar()),
+    );
+    import_progress.set_prefix("SQLite");
+    import_progress.set_message("writing catalog");
+    let sync_result = synchronize_with_progress(
+        &database,
+        &release,
+        tables,
+        activate,
+        |completed, _total| import_progress.set_position(completed as u64),
+    );
+    import_progress.finish_and_clear();
+    let version_id = sync_result?;
     eprintln!("synchronized release {release} as version {version_id}");
     Ok(())
 }

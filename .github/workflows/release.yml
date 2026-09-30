@@ -1,0 +1,181 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, for example 0.2.0 or v0.2.0"
+        required: true
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  BINARY_NAME: oracle-fusion-erp-catalog-mcp
+
+jobs:
+  prepare:
+    name: Prepare release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve and validate version
+        id: release
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          EVENT_TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            version="${INPUT_VERSION#v}"
+          else
+            version="${EVENT_TAG#v}"
+          fi
+          if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'; then
+            echo "Version must look like 1.2.3 or 1.2.3-rc.1" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Update package version and create tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+          manifest = Path("Cargo.toml")
+          text = manifest.read_text()
+          text, count = re.subn(
+              r'(?m)^version = "[^"]+"$',
+              f'version = "{version}"',
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("could not update Cargo.toml package version")
+          manifest.write_text(text)
+
+          lock = Path("Cargo.lock")
+          lock_text = lock.read_text()
+          pattern = (
+              r'(\[\[package\]\]\nname = "'
+              + re.escape("oracle-fusion-erp-catalog-mcp")
+              + r'"\nversion = ")[^"]+(")'
+          )
+          lock_text, count = re.subn(pattern, rf'\g<1>{version}\g<2>', lock_text, count=1)
+          if count != 1:
+              raise SystemExit("could not update Cargo.lock package version")
+          lock.write_text(lock_text)
+          PY
+
+          cargo fmt --all -- --check
+          cargo check
+          cargo test
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore: release ${TAG}"
+          git push origin HEAD:main
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+      - name: Validate existing tag package version
+        if: github.event_name == 'push'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          actual="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+          test "$actual" = "$VERSION" || {
+            echo "Tag v${VERSION} does not match Cargo.toml version ${actual}" >&2
+            exit 1
+          }
+
+  build:
+    name: Build ${{ matrix.asset }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-13
+            target: x86_64-apple-darwin
+            asset: oracle-fusion-erp-catalog-mcp-macos-x86_64
+            cross: false
+          - runner: macos-14
+            target: aarch64-apple-darwin
+            asset: oracle-fusion-erp-catalog-mcp-macos-aarch64
+            cross: false
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            asset: oracle-fusion-erp-catalog-mcp-linux-x86_64
+            cross: false
+          - runner: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            asset: oracle-fusion-erp-catalog-mcp-linux-aarch64
+            cross: true
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross --locked
+
+      - name: Build binary
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cross build --release --target "${{ matrix.target }}"
+          else
+            cargo build --release --target "${{ matrix.target }}"
+          fi
+          cp "target/${{ matrix.target }}/release/${BINARY_NAME}" "${{ matrix.asset }}"
+          chmod 755 "${{ matrix.asset }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: artifacts
+        run: sha256sum oracle-fusion-erp-catalog-mcp-* > SHA256SUMS
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          generate_release_notes: true
+          files: artifacts/*
