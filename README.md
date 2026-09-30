@@ -58,6 +58,21 @@ cargo run -- sync --release 26B --no-activate
 cargo run -- sync --release 26B --replace
 ```
 
+If the active release is `26B`, syncing `26C` or any later release creates and
+activates the newer release, then removes the previous active release after a
+successful synchronization. A module missing from an existing release is
+merged into that release, so SCM `26B` can be completed with Financials `26B`
+without reloading SCM.
+
+The CLI also provides:
+
+```sh
+target/release/oracle-erp-mcp --help
+target/release/oracle-erp-mcp --version
+target/release/oracle-erp-mcp sync --help
+target/release/oracle-erp-mcp sync --version
+```
+
 ## Initialization example
 
 ```sh

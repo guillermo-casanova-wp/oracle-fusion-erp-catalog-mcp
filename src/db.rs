@@ -1,6 +1,6 @@
 use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::{collections::BTreeSet, path::Path};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Version {
@@ -109,6 +109,7 @@ impl Database {
         Ok(db)
     }
 
+    #[cfg(test)]
     pub fn in_memory() -> SqlResult<Self> {
         Self::open(":memory:")
     }
@@ -322,29 +323,21 @@ impl Database {
             .optional()
     }
 
+    pub fn modules_for_version(&self, version_id: i64) -> SqlResult<BTreeSet<String>> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT DISTINCT module FROM tables WHERE version_id = ?1")?;
+        let modules = statement
+            .query_map(params![version_id], |row| row.get(0))?
+            .collect();
+        modules
+    }
+
     pub fn delete_version_by_release(&self, release_code: &str) -> SqlResult<bool> {
         Ok(self.connection.execute(
             "DELETE FROM versions WHERE release_code = ?1",
             params![release_code],
         )? > 0)
-    }
-
-    pub fn version_by_id(&self, id: i64) -> SqlResult<Option<Version>> {
-        self.connection
-            .query_row(
-                "SELECT id, release_code, synced_at, active_bool
-                 FROM versions WHERE id = ?1",
-                params![id],
-                |row| {
-                    Ok(Version {
-                        id: row.get(0)?,
-                        release_code: row.get(1)?,
-                        synced_at: row.get(2)?,
-                        active: row.get(3)?,
-                    })
-                },
-            )
-            .optional()
     }
 
     pub fn activate_version(&self, version_id: i64) -> SqlResult<()> {
@@ -553,82 +546,6 @@ impl Database {
             })
         })?;
         rows.collect()
-    }
-
-    pub fn tables_for_version(&self, version_id: i64) -> SqlResult<Vec<TableRecord>> {
-        let mut statement = self.connection.prepare(
-            "SELECT id, version_id, module, table_name, description, source_url, object_type
-             FROM tables WHERE version_id = ?1 ORDER BY table_name",
-        )?;
-        let rows = statement
-            .query_map(params![version_id], |row| {
-                Ok(TableRecord {
-                    id: row.get(0)?,
-                    version_id: row.get(1)?,
-                    module: row.get(2)?,
-                    table_name: row.get(3)?,
-                    description: row.get(4)?,
-                    source_url: row.get(5)?,
-                    object_type: row.get(6)?,
-                })
-            })?
-            .collect();
-        rows
-    }
-
-    pub fn table_structure_in_version(
-        &self,
-        version_id: i64,
-        table_name: &str,
-    ) -> SqlResult<Option<TableStructure>> {
-        let table = self
-            .connection
-            .query_row(
-                "SELECT id, version_id, module, table_name, description, source_url, object_type
-                 FROM tables WHERE version_id = ?1 AND table_name = upper(?2)",
-                params![version_id, table_name],
-                |row| {
-                    Ok(TableRecord {
-                        id: row.get(0)?,
-                        version_id: row.get(1)?,
-                        module: row.get(2)?,
-                        table_name: row.get(3)?,
-                        description: row.get(4)?,
-                        source_url: row.get(5)?,
-                        object_type: row.get(6)?,
-                    })
-                },
-            )
-            .optional()?;
-        let Some(table) = table else {
-            return Ok(None);
-        };
-        let columns = self.query_columns(table.id)?;
-        let outgoing_references = self.query_references("WHERE source_table_id = ?1", table.id)?;
-        let incoming_references = self.query_references("WHERE target_table_id = ?1", table.id)?;
-        let mut indexes = Vec::new();
-        let mut statement = self.connection.prepare(
-            "SELECT id, table_id, index_name, indexed_columns, is_unique
-             FROM indexes WHERE table_id = ?1 ORDER BY index_name",
-        )?;
-        for row in statement.query_map(params![table.id], |row| {
-            Ok(IndexRecord {
-                id: row.get(0)?,
-                table_id: row.get(1)?,
-                index_name: row.get(2)?,
-                indexed_columns: row.get(3)?,
-                is_unique: row.get(4)?,
-            })
-        })? {
-            indexes.push(row?);
-        }
-        Ok(Some(TableStructure {
-            table: table,
-            columns,
-            outgoing_references,
-            incoming_references,
-            indexes,
-        }))
     }
 
     pub fn search_tables(&self, query: &str, limit: usize) -> SqlResult<Vec<TableRecord>> {

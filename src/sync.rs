@@ -1,12 +1,9 @@
-use crate::db::{CatalogTable, Database, TableStructure};
+use crate::db::{CatalogTable, Database};
 use anyhow::{anyhow, Context, Result};
 use reqwest::Client;
 use scraper::{Html, Selector};
-use serde::{Deserialize, Serialize};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    time::Duration,
-};
+use serde::Deserialize;
+use std::{collections::BTreeSet, time::Duration};
 use url::Url;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,22 +104,6 @@ impl OracleExtractor {
         self.extract_html_guide(&bytes, source).await
     }
 
-    pub fn parse_payload(
-        &self,
-        payload: &[u8],
-        content_type: &str,
-        source: &OracleSource,
-    ) -> Result<Vec<CatalogTable>> {
-        if content_type.contains("json") || payload.first() == Some(&b'{') {
-            let document: JsonCatalog = serde_json::from_slice(payload)?;
-            return Ok(document.tables);
-        }
-        if content_type.contains("xml") || payload.starts_with(b"<?xml") {
-            return parse_xml_catalog(payload);
-        }
-        parse_html_index(payload, source)
-    }
-
     async fn extract_html_guide(
         &self,
         initial_payload: &[u8],
@@ -186,58 +167,6 @@ impl OracleExtractor {
         }
         Ok(tables)
     }
-}
-
-fn parse_html_index(payload: &[u8], source: &OracleSource) -> Result<Vec<CatalogTable>> {
-    let html = std::str::from_utf8(payload).context("HTML index is not UTF-8")?;
-    let document = Html::parse_document(html);
-    let selector = Selector::parse("a").map_err(|error| anyhow!("invalid selector: {error}"))?;
-    let prefix = format!(
-        "/en/cloud/saas/{}/{}/{}/",
-        source.module.path(),
-        source.release,
-        source.module.guide()
-    );
-    let mut seen = BTreeSet::new();
-    let mut result = Vec::new();
-    for anchor in document.select(&selector) {
-        let Some(href) = anchor.value().attr("href") else {
-            continue;
-        };
-        let Ok(url) = source.index_url.join(href) else {
-            continue;
-        };
-        if url.host_str() != Some("docs.oracle.com")
-            || !url.path().starts_with(&prefix)
-            || !url.path().ends_with(".html")
-            || !seen.insert(url.as_str().to_owned())
-        {
-            continue;
-        }
-        let Some(slug) = url.path().rsplit('/').next() else {
-            continue;
-        };
-        let name = slug
-            .trim_end_matches(".html")
-            .rsplit_once('-')
-            .map(|(value, _)| value)
-            .unwrap_or(slug.trim_end_matches(".html"))
-            .replace('-', "_")
-            .to_ascii_uppercase();
-        if name == "INDEX" || name == "OVERVIEW" {
-            continue;
-        }
-        result.push(CatalogTable {
-            module: source.module.label().to_owned(),
-            table_name: name,
-            description: Some(anchor.text().collect::<String>().trim().to_owned())
-                .filter(|value| !value.is_empty()),
-            source_url: Some(url.to_string()),
-            object_type: None,
-            ..CatalogTable::default()
-        });
-    }
-    Ok(result)
 }
 
 fn parse_table_page(
@@ -368,7 +297,35 @@ fn parse_xml_catalog(payload: &[u8]) -> Result<Vec<CatalogTable>> {
         #[serde(rename = "table", default)]
         tables: Vec<CatalogTable>,
     }
-    Ok(quick_xml::de::from_reader(payload)?)
+    let document: XmlCatalog = quick_xml::de::from_reader(payload)?;
+    Ok(document.tables)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct ReleaseCode {
+    year: u16,
+    cycle: u8,
+}
+
+fn parse_release_code(value: &str) -> Result<ReleaseCode> {
+    let normalized = value.trim().to_ascii_uppercase();
+    if normalized.len() < 2 {
+        return Err(anyhow!("invalid release code: {value}"));
+    }
+    let (year, cycle) = normalized.split_at(normalized.len() - 1);
+    if !year.chars().all(|character| character.is_ascii_digit())
+        || !cycle.as_bytes()[0].is_ascii_uppercase()
+    {
+        return Err(anyhow!("invalid release code: {value}"));
+    }
+    Ok(ReleaseCode {
+        year: year.parse()?,
+        cycle: cycle.as_bytes()[0] - b'A',
+    })
+}
+
+fn is_superior_release(candidate: &str, current: &str) -> Result<bool> {
+    Ok(parse_release_code(candidate)? > parse_release_code(current)?)
 }
 
 pub fn synchronize(
@@ -377,13 +334,45 @@ pub fn synchronize(
     mut tables: Vec<CatalogTable>,
     activate: bool,
 ) -> Result<i64> {
-    if db.version_by_release(release)?.is_some() {
-        return Err(anyhow!("release {release} already exists"));
+    let release = release.trim().to_ascii_uppercase();
+    parse_release_code(&release)?;
+    let previous = db.active_version()?;
+    let target = db.version_by_release(&release)?;
+    let incoming_modules: BTreeSet<_> = tables.iter().map(|table| table.module.clone()).collect();
+    if incoming_modules.is_empty() {
+        return Err(anyhow!("sync produced no modules"));
     }
-    let version_id = if let Some(previous) = db.active_version()? {
-        db.clone_version(previous.id, release)?
+
+    let version_id = if let Some(existing) = target {
+        let existing_modules = db.modules_for_version(existing.id)?;
+        if incoming_modules
+            .iter()
+            .any(|module| existing_modules.contains(module))
+        {
+            return Err(anyhow!(
+                "release {release} already contains one of the synchronized modules"
+            ));
+        }
+        if let Some(previous) = &previous {
+            if !is_superior_release(&release, &previous.release_code)? && previous.id != existing.id
+            {
+                return Err(anyhow!(
+                    "release {release} is not superior to active release {}",
+                    previous.release_code
+                ));
+            }
+        }
+        existing.id
+    } else if let Some(previous) = &previous {
+        if !is_superior_release(&release, &previous.release_code)? {
+            return Err(anyhow!(
+                "release {release} is not superior to active release {}",
+                previous.release_code
+            ));
+        }
+        db.clone_version(previous.id, &release)?
     } else {
-        db.create_version(release, activate)?
+        db.create_version(&release, activate)?
     };
     for table in &mut tables {
         table.table_name = table.table_name.to_ascii_uppercase();
@@ -399,109 +388,98 @@ pub fn synchronize(
     db.rebuild_fts(version_id)?;
     if activate {
         db.activate_version(version_id)?;
-    }
-    Ok(version_id)
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct DiffReport {
-    pub from_release: String,
-    pub to_release: String,
-    pub new_tables: Vec<String>,
-    pub removed_tables: Vec<String>,
-    pub added_columns: Vec<String>,
-    pub removed_columns: Vec<String>,
-    pub changed_columns: Vec<String>,
-}
-
-pub fn diff_versions(db: &Database, from_id: i64, to_id: i64) -> Result<DiffReport> {
-    let from = db
-        .version_by_id(from_id)?
-        .ok_or_else(|| anyhow!("source version does not exist"))?;
-    let to = db
-        .version_by_id(to_id)?
-        .ok_or_else(|| anyhow!("target version does not exist"))?;
-    let from_tables = db.tables_for_version(from_id)?;
-    let to_tables = db.tables_for_version(to_id)?;
-    let from_map: BTreeMap<_, _> = from_tables
-        .iter()
-        .map(|table| (table.table_name.clone(), table))
-        .collect();
-    let to_map: BTreeMap<_, _> = to_tables
-        .iter()
-        .map(|table| (table.table_name.clone(), table))
-        .collect();
-    let new_tables = to_map
-        .keys()
-        .filter(|name| !from_map.contains_key(*name))
-        .cloned()
-        .collect();
-    let removed_tables = from_map
-        .keys()
-        .filter(|name| !to_map.contains_key(*name))
-        .cloned()
-        .collect();
-    let mut report = DiffReport {
-        from_release: from.release_code,
-        to_release: to.release_code,
-        new_tables,
-        removed_tables,
-        added_columns: Vec::new(),
-        removed_columns: Vec::new(),
-        changed_columns: Vec::new(),
-    };
-    for name in from_map.keys().filter(|name| to_map.contains_key(*name)) {
-        let old = db
-            .table_structure_in_version(from_id, name)?
-            .ok_or_else(|| anyhow!("inconsistent source table: {name}"))?;
-        let new = db
-            .table_structure_in_version(to_id, name)?
-            .ok_or_else(|| anyhow!("inconsistent target table: {name}"))?;
-        compare_columns(name, &old, &new, &mut report);
-    }
-    Ok(report)
-}
-
-fn compare_columns(
-    name: &str,
-    old: &TableStructure,
-    new: &TableStructure,
-    report: &mut DiffReport,
-) {
-    let old_map: BTreeMap<_, _> = old
-        .columns
-        .iter()
-        .map(|column| (column.column_name.clone(), column))
-        .collect();
-    let new_map: BTreeMap<_, _> = new
-        .columns
-        .iter()
-        .map(|column| (column.column_name.clone(), column))
-        .collect();
-    for column in new_map.keys().filter(|key| !old_map.contains_key(*key)) {
-        report.added_columns.push(format!("{name}.{column}"));
-    }
-    for column in old_map.keys().filter(|key| !new_map.contains_key(*key)) {
-        report.removed_columns.push(format!("{name}.{column}"));
-    }
-    for column in old_map.keys().filter(|key| new_map.contains_key(*key)) {
-        let old_column = old_map[column];
-        let new_column = new_map[column];
-        if old_column.data_type != new_column.data_type
-            || old_column.length != new_column.length
-            || old_column.nullable != new_column.nullable
-        {
-            report.changed_columns.push(format!(
-                "{name}.{column}: {} -> {}",
-                old_column.data_type, new_column.data_type
-            ));
+        if let Some(previous) = previous {
+            if previous.id != version_id && is_superior_release(&release, &previous.release_code)? {
+                db.delete_version_by_release(&previous.release_code)?;
+            }
         }
     }
+    Ok(version_id)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn catalog_table(module: &str, table_name: &str) -> CatalogTable {
+        CatalogTable {
+            module: module.to_owned(),
+            table_name: table_name.to_owned(),
+            ..CatalogTable::default()
+        }
+    }
+
+    #[test]
+    fn orders_oracle_releases() {
+        assert!(is_superior_release("26C", "26B").expect("release"));
+        assert!(is_superior_release("27A", "26C").expect("release"));
+        assert!(!is_superior_release("26B", "26C").expect("release"));
+        assert_eq!(
+            parse_release_code("26B").expect("release"),
+            ReleaseCode { year: 26, cycle: 1 }
+        );
+    }
+
+    #[test]
+    fn rejects_non_superior_release() {
+        let db = Database::in_memory().expect("in-memory SQLite");
+        db.create_version("26C", true).expect("release");
+        let error = synchronize(&db, "26B", vec![catalog_table("SCM", "OLDER_TABLE")], true)
+            .expect_err("downgrade");
+        assert!(error.to_string().contains("not superior"));
+    }
+
+    #[test]
+    fn merges_missing_module_into_existing_release() {
+        let db = Database::in_memory().expect("in-memory SQLite");
+        let version_id = db.create_version("26B", true).expect("release");
+        db.upsert_catalog_table(version_id, &catalog_table("SCM", "SCM_TABLE"))
+            .expect("SCM table");
+
+        synchronize(
+            &db,
+            "26B",
+            vec![catalog_table("FINANCIALS", "FINANCIALS_TABLE")],
+            true,
+        )
+        .expect("module merge");
+
+        let modules = db.modules_for_version(version_id).expect("modules");
+        assert!(modules.contains("SCM"));
+        assert!(modules.contains("FINANCIALS"));
+    }
+
+    #[test]
+    fn prunes_previous_active_release_after_upgrade() {
+        let db = Database::in_memory().expect("in-memory SQLite");
+        let version_id = db.create_version("26B", true).expect("release");
+        db.upsert_catalog_table(version_id, &catalog_table("SCM", "OLD_TABLE"))
+            .expect("old table");
+
+        synchronize(&db, "26C", vec![catalog_table("SCM", "NEW_TABLE")], true).expect("upgrade");
+
+        assert!(db.version_by_release("26B").expect("old release").is_none());
+        assert!(db.version_by_release("26C").expect("new release").is_some());
+    }
+
+    #[test]
+    fn keeps_previous_release_when_not_activating() {
+        let db = Database::in_memory().expect("in-memory SQLite");
+        let version_id = db.create_version("26B", true).expect("release");
+        db.upsert_catalog_table(version_id, &catalog_table("SCM", "OLD_TABLE"))
+            .expect("old table");
+
+        synchronize(&db, "26C", vec![catalog_table("SCM", "NEW_TABLE")], false)
+            .expect("inactive upgrade");
+
+        assert!(db.version_by_release("26B").expect("old release").is_some());
+        assert!(
+            !db.version_by_release("26C")
+                .expect("new release")
+                .expect("new version")
+                .active
+        );
+    }
 
     #[test]
     fn parses_oracle_table_page() {

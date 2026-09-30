@@ -39,13 +39,41 @@ struct JsonRpcError {
 #[tokio::main]
 async fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
-    if args.first().map(String::as_str) == Some("sync") {
-        run_sync_command(&args[1..])
+    match args.first().map(String::as_str) {
+        Some("-h" | "--help") => {
+            println!("{}", cli_help());
+            Ok(())
+        }
+        Some("-V" | "--version" | "version") => {
+            println!("{}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
+        Some("sync") if matches!(args.get(1).map(String::as_str), Some("-h" | "--help")) => {
+            println!("{}", sync_help());
+            Ok(())
+        }
+        Some("sync") if matches!(args.get(1).map(String::as_str), Some("-V" | "--version")) => {
+            println!("{}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
+        Some("sync") => run_sync_command(&args[1..])
             .await
-            .map_err(|error| io::Error::new(io::ErrorKind::Other, error.to_string()))?;
-        return Ok(());
+            .map_err(|error| io::Error::new(io::ErrorKind::Other, error.to_string())),
+        _ => run_mcp().await,
     }
-    run_mcp().await
+}
+
+fn cli_help() -> &'static str {
+    "Oracle ERP MCP\n\n\
+Usage:\n  oracle-erp-mcp [OPTIONS]\n  oracle-erp-mcp sync --release RELEASE [OPTIONS]\n\n\
+Options:\n  -h, --help       Show this help\n  -V, --version    Show the version\n\n\
+With no command, the process starts the MCP server."
+}
+
+fn sync_help() -> &'static str {
+    "Synchronize an Oracle release into SQLite\n\n\
+Usage:\n  oracle-erp-mcp sync --release RELEASE [OPTIONS]\n\n\
+Options:\n  --release RELEASE             Oracle release, such as 26B\n  --module financials|scm|all    Module to synchronize\n  --no-activate                  Keep the synchronized release inactive\n  --replace                      Delete the existing target release before syncing\n  -h, --help                     Show this help\n  -V, --version                  Show the version"
 }
 
 async fn run_sync_command(args: &[String]) -> anyhow::Result<()> {
@@ -351,5 +379,12 @@ mod tests {
     fn requires_sync_release() {
         let error = parse_sync_args(&[]).expect_err("missing release");
         assert_eq!(error.to_string(), "sync requires --release RELEASE");
+    }
+
+    #[test]
+    fn exposes_cli_help_and_version_text() {
+        assert!(cli_help().contains("--version"));
+        assert!(sync_help().contains("--replace"));
+        assert_eq!(env!("CARGO_PKG_VERSION"), "0.1.0");
     }
 }
