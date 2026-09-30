@@ -29,6 +29,12 @@ curl -fsSL \
   | sh
 ```
 
+If you already installed it, update the binary with:
+
+```sh
+oracle-fusion-erp-catalog-mcp update
+```
+
 ## Set up your agent
 
 Run the command for the agent you use, then restart that agent:
