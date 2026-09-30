@@ -55,31 +55,6 @@ default database location. Without an override, the database is stored as
 - Linux: `${XDG_DATA_HOME:-~/.local/share}/oracle-fusion-erp-catalog-mcp/catalog.sqlite`
 - Windows: `%LOCALAPPDATA%\oracle-fusion-erp-catalog-mcp\catalog.sqlite`
 
-## Update
-
-The running MCP binary checks periodically for a newer GitHub release. If one
-is available, it reports the update on stderr:
-
-```text
-Update available: v0.1.3. Run `oracle-fusion-erp-catalog-mcp update`, then restart your MCP agent.
-```
-
-Check for an update without installing it:
-
-```sh
-oracle-fusion-erp-catalog-mcp update --check
-```
-
-Install the latest release:
-
-```sh
-oracle-fusion-erp-catalog-mcp update
-```
-
-The updater verifies the published SHA-256 checksum before replacing the
-binary. After a successful update, restart your MCP agent so it starts the new
-binary. The SQLite database and agent configuration are preserved.
-
 ## Sync
 
 Synchronize both Financials and SCM from the Oracle Help Center:
