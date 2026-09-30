@@ -63,8 +63,9 @@ pub async fn run(args: &[String]) -> Result<()> {
 pub async fn check_for_update() -> Result<Option<String>> {
     let current = current_version()?;
     if let Some(cached) = read_fresh_cache()? {
-        let cached_version = normalize_version(&cached.latest_version)?;
-        return Ok(version_is_newer(&current, &cached_version).then_some(cached.latest_version));
+        if let Ok(cached_version) = normalize_version(&cached.latest_version) {
+            return Ok(version_is_newer(&current, &cached_version).then_some(cached.latest_version));
+        }
     }
 
     let latest = latest_version().await?;
@@ -123,19 +124,27 @@ fn ensure_newer(current: &semver::Version, target: &semver::Version) -> Result<(
 
 async fn latest_version() -> Result<semver::Version> {
     let client = http_client()?;
-    let release = client
+    let releases = client
         .get(format!(
-            "https://api.github.com/repos/{OWNER}/{REPOSITORY}/releases/latest"
+            "https://api.github.com/repos/{OWNER}/{REPOSITORY}/releases?per_page=100"
         ))
         .send()
         .await
         .context("could not query GitHub releases")?
         .error_for_status()
         .context("GitHub releases returned an error")?
-        .json::<GitHubRelease>()
+        .json::<Vec<GitHubRelease>>()
         .await
         .context("could not parse GitHub release response")?;
-    normalize_version(&release.tag_name)
+    latest_semver_release(&releases)
+}
+
+fn latest_semver_release(releases: &[GitHubRelease]) -> Result<semver::Version> {
+    releases
+        .iter()
+        .filter_map(|release| normalize_version(&release.tag_name).ok())
+        .max()
+        .ok_or_else(|| anyhow!("no semver binary release was found"))
 }
 
 async fn install_version(version: &semver::Version) -> Result<()> {
@@ -286,5 +295,26 @@ mod tests {
         let binary = b"binary";
         let checksum = format!("{:x}  asset", Sha256::digest(binary));
         verify_checksum(binary, "asset", &checksum).expect("checksum");
+    }
+
+    #[test]
+    fn ignores_catalog_releases_when_finding_latest_binary() {
+        let releases = vec![
+            GitHubRelease {
+                tag_name: "catalog-26B".to_owned(),
+            },
+            GitHubRelease {
+                tag_name: "v0.1.4".to_owned(),
+            },
+            GitHubRelease {
+                tag_name: "v0.1.5".to_owned(),
+            },
+        ];
+        assert_eq!(
+            latest_semver_release(&releases)
+                .expect("latest release")
+                .to_string(),
+            "0.1.5"
+        );
     }
 }

@@ -55,6 +55,15 @@ default database location. Without an override, the database is stored as
 - Linux: `${XDG_DATA_HOME:-~/.local/share}/oracle-fusion-erp-catalog-mcp/catalog.sqlite`
 - Windows: `%LOCALAPPDATA%\oracle-fusion-erp-catalog-mcp\catalog.sqlite`
 
+Install the pre-generated catalog for a release:
+
+```sh
+oracle-fusion-erp-catalog-mcp catalog install --release 26B
+```
+
+This downloads the published SQLite catalog. Use `sync` only when generating
+or refreshing a catalog directly from Oracle.
+
 ## Sync
 
 Synchronize Financials, SCM, and HCM from the Oracle Help Center:
@@ -73,26 +82,6 @@ default is `2`. Set it to `1` to minimize network and memory pressure.
 Synchronization activates newer releases and removes the previous active
 release after success; a missing module can be merged into an existing release.
 The database path is controlled by `ORACLE_MCP_DATABASE`.
-
-### Distribute a generated catalog
-
-Catalog generation is performed once by a maintainer. It is not repeated when
-the binary is installed or updated:
-
-```sh
-ORACLE_MCP_DATABASE="$PWD/catalog-26B.sqlite" \
-  oracle-fusion-erp-catalog-mcp sync --release 26B --module all
-make catalog-release RELEASE=26B DATABASE="$PWD/catalog-26B.sqlite"
-```
-
-The `make catalog-release` target compresses the SQLite file, creates a
-manifest and SHA-256 checksum, and publishes a separate GitHub Release named
-`catalog-26B`. It requires the GitHub CLI to be authenticated. End users can
-install that pre-generated catalog without running synchronization:
-
-```sh
-oracle-fusion-erp-catalog-mcp catalog install --release 26B
-```
 
 ## MCP usage
 
