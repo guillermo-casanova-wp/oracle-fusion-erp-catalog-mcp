@@ -42,7 +42,12 @@ Run the command for the agent you use, then restart that agent:
 | All agents | `oracle-fusion-erp-catalog-mcp install all --binary "$HOME/.local/bin/oracle-fusion-erp-catalog-mcp"` |
 
 Use `--dry-run` to preview changes. Set `ORACLE_MCP_DATABASE` to override the
-default database location.
+default database location. Without an override, the database is stored as
+`catalog.sqlite` in the platform user-data directory:
+
+- macOS: `~/Library/Application Support/oracle-fusion-erp-catalog-mcp/catalog.sqlite`
+- Linux: `${XDG_DATA_HOME:-~/.local/share}/oracle-fusion-erp-catalog-mcp/catalog.sqlite`
+- Windows: `%LOCALAPPDATA%\oracle-fusion-erp-catalog-mcp\catalog.sqlite`
 
 ## Sync
 
