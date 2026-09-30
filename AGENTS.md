@@ -20,6 +20,10 @@ These instructions apply to the entire project.
 - `oracle-fusion-erp-catalog-mcp sync --release RELEASE` synchronizes Oracle data.
 - `oracle-fusion-erp-catalog-mcp install AGENT` registers the server globally in
   Cursor, Claude Code, Codex CLI, or OpenCode.
+- `scripts/release.sh VERSION` validates the branch, triggers the GitHub
+  Actions release workflow, and waits for publication.
+- The `Makefile` provides shortcuts for verification and release automation;
+  use the binary subcommands directly for synchronization and installation.
 - `--help` and `--version` are available at the top level and for subcommands.
 
 ## Git workflow
@@ -53,6 +57,8 @@ These instructions apply to the entire project.
   on stderr.
 - Installer changes must preserve unrelated agent configuration and be
   idempotent. Use `--dry-run` when testing configuration changes.
+- Release scripts must not build release binaries locally; GitHub Actions owns
+  version updates, tags, platform builds, checksums, and publication.
 
 ## Verification
 

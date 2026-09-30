@@ -57,6 +57,39 @@ Synchronization activates newer releases and removes the previous active
 release after success; a missing module can be merged into an existing release.
 The database path is controlled by `ORACLE_MCP_DATABASE`.
 
+## Release
+
+Run the complete release workflow from an up-to-date `main` branch:
+
+```sh
+scripts/release.sh 0.2.0
+```
+
+The script validates the version and branch state, triggers the GitHub Actions
+release workflow, waits for completion, and prints the published release URL.
+The workflow runs the project checks. Preview the workflow trigger without
+publishing with:
+
+```sh
+scripts/release.sh 0.2.0 --dry-run
+```
+
+The GitHub workflow updates the package version, creates the tag, builds the
+platform binaries, generates checksums, and publishes the GitHub release.
+
+## Make targets
+
+Common workflows are available through the `Makefile`:
+
+```sh
+make verify
+make release VERSION=0.2.0
+```
+
+Use `DRY_RUN=1` with `make release` to preview the workflow trigger.
+Use the binary's `sync` and `install` subcommands directly for those
+operations.
+
 ## MCP usage
 
 With no subcommand, the installed binary speaks JSON-RPC 2.0 over stdin/stdout.
@@ -75,20 +108,21 @@ Available tools are `list_modules_and_tables`, `search_table_structure`, and
 
 ## Setup dev environment
 
-Install stable Rust, then build and test from a checkout. Cargo commands are
-for development only; operational and user commands above use the installed
-binary.
+Install stable Rust, then verify changes from a checkout. Operational and user
+commands above use the installed binary.
 
 ```sh
-cargo build --release
-cargo fmt --all -- --check
-cargo check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test
-cargo install cargo-llvm-cov
+make verify
+make check
+make test
+```
+
+For optional local coverage, install `cargo-llvm-cov` and run:
+
+```sh
 cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info
 ```
 
-GitHub Actions runs the same formatting, Clippy, test, and coverage checks on
-pushes to `main` and pull requests. The generated `lcov.info` report is
-available as the `rust-coverage-lcov` workflow artifact.
+GitHub Actions runs formatting, Clippy, tests, and coverage on pushes to `main`
+and pull requests. Release artifacts are built and published only by the
+GitHub Actions release workflow.
