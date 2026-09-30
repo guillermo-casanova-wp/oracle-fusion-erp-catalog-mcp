@@ -62,19 +62,6 @@ Synchronization activates newer releases and removes the previous active
 release after success; a missing module can be merged into an existing release.
 The database path is controlled by `ORACLE_MCP_DATABASE`.
 
-## Make targets
-
-Common workflows are available through the `Makefile`:
-
-```sh
-make verify
-make release BUMP=patch
-```
-
-Use `DRY_RUN=1` with `make release` to preview the release calculation.
-Use the binary's `sync` and `install` subcommands directly for those
-operations.
-
 ## MCP usage
 
 With no subcommand, the installed binary speaks JSON-RPC 2.0 over stdin/stdout.
