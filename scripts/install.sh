@@ -15,12 +15,13 @@ Defaults:
   --version      VERSION, or latest
   --install-dir  INSTALL_DIR, or $HOME/.local/bin
   --asset        ASSET_NAME, or REPOSITORY-OS-ARCH
-  --database     DATABASE, or $PWD/oracle-fusion-erp-catalog-mcp.sqlite
+  --database     DATABASE, or the platform user-data directory
   --agent        cursor, claude-code, codex, opencode, all, or none
 
 The release asset is expected to be a directly downloadable executable.
 Without --agent, the installer asks which agent should receive the MCP
-configuration when a terminal is available.
+configuration when a terminal is available. In interactive mode, it also
+asks whether to use the platform database location or a custom path.
 EOF
 }
 
@@ -29,7 +30,7 @@ repo=${GITHUB_REPO:-oracle-fusion-erp-catalog-mcp}
 version=${VERSION:-latest}
 install_dir=${INSTALL_DIR:-"${HOME:-}/.local/bin"}
 asset=${ASSET_NAME:-}
-database=${DATABASE:-"${PWD}/oracle-fusion-erp-catalog-mcp.sqlite"}
+database=${DATABASE:-}
 agent=${AGENT:-}
 
 while [ "$#" -gt 0 ]; do
@@ -111,9 +112,35 @@ if [ -z "$agent" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
 fi
 
 agent=${agent:-none}
+
+if [ -z "$database" ] && [ "$agent" != "none" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    printf '%s\n' \
+        "Where should the SQLite database be stored?" \
+        "  1) Platform default (recommended)" \
+        "  2) Custom path"
+    printf 'Choose [1-2] (default: 1): '
+    read -r database_choice </dev/tty || database_choice=1
+    case "$database_choice" in
+        2)
+            printf 'Database path: '
+            read -r database </dev/tty || database=
+            if [ -z "$database" ]; then
+                echo "error: database path cannot be empty" >&2
+                exit 2
+            fi
+            ;;
+        1|"") ;;
+        *) echo "error: choose 1 or 2" >&2; exit 2 ;;
+    esac
+fi
+
 case "$agent" in
     cursor|claude-code|codex|opencode|all)
-        "$binary" install "$agent" --binary "$binary" --database "$database"
+        if [ -n "$database" ]; then
+            "$binary" install "$agent" --binary "$binary" --database "$database"
+        else
+            "$binary" install "$agent" --binary "$binary"
+        fi
         ;;
     none)
         echo "Skipped agent configuration."
