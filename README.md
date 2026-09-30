@@ -108,20 +108,23 @@ Available tools are `list_modules_and_tables`, `search_table_structure`, and
 
 ## Setup dev environment
 
-Install stable Rust, then build and test from a checkout. Cargo commands are
-for development only; operational and user commands above use the installed
-binary.
+Install stable Rust, then verify changes from a checkout. Operational and user
+commands above use the installed binary.
 
 ```sh
-cargo build --release
 cargo fmt --all -- --check
 cargo check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test
-cargo install cargo-llvm-cov
+make verify
+```
+
+For optional local coverage, install `cargo-llvm-cov` and run:
+
+```sh
 cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info
 ```
 
-GitHub Actions runs the same formatting, Clippy, test, and coverage checks on
-pushes to `main` and pull requests. The generated `lcov.info` report is
-available as the `rust-coverage-lcov` workflow artifact.
+GitHub Actions runs formatting, Clippy, tests, and coverage on pushes to `main`
+and pull requests. Release artifacts are built and published only by the
+GitHub Actions release workflow.
