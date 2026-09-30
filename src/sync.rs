@@ -4,7 +4,11 @@ use indicatif::ProgressBar;
 use reqwest::Client;
 use scraper::{Html, Selector};
 use serde::Deserialize;
-use std::{collections::BTreeSet, path::Path, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+    time::Duration,
+};
 use url::Url;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,12 +54,20 @@ pub struct OracleSource {
 impl OracleSource {
     pub fn help_center(module: OracleModule, release: &str) -> Result<Self> {
         let release = release.to_ascii_lowercase();
-        let url = format!(
-            "https://docs.oracle.com/en/cloud/saas/{}/{}/{}/index.html",
-            module.path(),
-            release,
-            module.guide()
-        );
+        let url = if module == OracleModule::Hcm {
+            format!(
+                "https://docs.oracle.com/en/cloud/saas/{}/{}/index.html",
+                module.path(),
+                module.guide()
+            )
+        } else {
+            format!(
+                "https://docs.oracle.com/en/cloud/saas/{}/{}/{}/index.html",
+                module.path(),
+                release,
+                module.guide()
+            )
+        };
         Ok(Self {
             module,
             release,
@@ -125,12 +137,20 @@ impl OracleExtractor {
     ) -> Result<Vec<CatalogTable>> {
         let next_selector = Selector::parse(r#"link[rel="next"]"#)
             .map_err(|error| anyhow!("invalid selector: {error}"))?;
-        let prefix = format!(
-            "/en/cloud/saas/{}/{}/{}/",
-            source.module.path(),
-            source.release,
-            source.module.guide()
-        );
+        let prefix = if source.module == OracleModule::Hcm {
+            format!(
+                "/en/cloud/saas/{}/{}/",
+                source.module.path(),
+                source.module.guide()
+            )
+        } else {
+            format!(
+                "/en/cloud/saas/{}/{}/{}/",
+                source.module.path(),
+                source.release,
+                source.module.guide()
+            )
+        };
         let mut current_url = source.index_url.clone();
         let mut current_payload = initial_payload.to_vec();
         let mut seen = BTreeSet::new();
@@ -303,28 +323,39 @@ fn parse_indexes(
     let Some(indexes_table) = document.select(&indexes_selector).next() else {
         return Ok(Vec::new());
     };
-    let mut indexes = Vec::new();
+    let mut indexes = BTreeMap::new();
     for row in indexes_table.select(row_selector) {
         let cells: Vec<_> = row.select(cell_selector).collect();
         if cells.len() < 4 {
             continue;
         }
-        let index_name = text_content(cells[0]);
+        let index_name = text_content(cells[0]).to_ascii_uppercase();
         if index_name.is_empty() {
             continue;
         }
-        indexes.push(crate::db::CatalogIndex {
-            index_name,
-            indexed_columns: text_content(cells[3])
-                .split(',')
-                .map(str::trim)
-                .filter(|column| !column.is_empty())
-                .map(str::to_owned)
-                .collect(),
-            is_unique: text_content(cells[1]).eq_ignore_ascii_case("unique"),
-        });
+        let entry = indexes
+            .entry(index_name.clone())
+            .or_insert_with(|| crate::db::CatalogIndex {
+                index_name,
+                indexed_columns: Vec::new(),
+                is_unique: false,
+            });
+        entry.is_unique |= text_content(cells[1]).eq_ignore_ascii_case("unique");
+        for column in text_content(cells[3])
+            .split(',')
+            .map(str::trim)
+            .filter(|column| !column.is_empty())
+        {
+            if !entry
+                .indexed_columns
+                .iter()
+                .any(|existing| existing == column)
+            {
+                entry.indexed_columns.push(column.to_owned());
+            }
+        }
     }
-    Ok(indexes)
+    Ok(indexes.into_values().collect())
 }
 
 fn text_content(element: scraper::ElementRef<'_>) -> String {
@@ -561,7 +592,7 @@ mod tests {
         let source = OracleSource::help_center(OracleModule::Hcm, "26B").expect("HCM source");
         assert_eq!(
             source.index_url.as_str(),
-            "https://docs.oracle.com/en/cloud/saas/human-resources/26b/oedmh/index.html"
+            "https://docs.oracle.com/en/cloud/saas/human-resources/oedmh/index.html"
         );
         assert_eq!(OracleModule::Hcm.label(), "HCM");
     }
@@ -675,6 +706,10 @@ mod tests {
                       <td>RCV_SHIPMENT_LINES_U1</td><td>Unique</td><td>Default</td>
                       <td>SHIPMENT_LINE_ID</td><td></td>
                     </tr>
+                    <tr>
+                      <td>RCV_SHIPMENT_LINES_U1</td><td>Unique</td><td>Default</td>
+                      <td>LAST_UPDATE_DATE</td><td></td>
+                    </tr>
                   </tbody>
                 </table>
               </body>
@@ -699,5 +734,9 @@ mod tests {
         assert_eq!(table.references[0].target_column, None);
         assert_eq!(table.indexes[0].index_name, "RCV_SHIPMENT_LINES_U1");
         assert!(table.indexes[0].is_unique);
+        assert_eq!(
+            table.indexes[0].indexed_columns,
+            vec!["SHIPMENT_LINE_ID", "LAST_UPDATE_DATE"]
+        );
     }
 }

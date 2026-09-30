@@ -10,11 +10,15 @@ use std::{
 
 #[derive(Debug, Serialize, Deserialize)]
 struct CachedCatalog {
+    #[serde(default)]
+    format_version: u8,
     release: String,
     module: String,
     source_url: String,
     tables: Vec<CatalogTable>,
 }
+
+const CACHE_FORMAT_VERSION: u8 = 1;
 
 pub fn cache_path(source: &OracleSource) -> Result<PathBuf> {
     let directory = paths::sync_cache_directory()?;
@@ -40,7 +44,8 @@ pub fn load(source: &OracleSource) -> Result<Option<Vec<CatalogTable>>> {
             return Ok(None);
         }
     };
-    if cached.release != source.release
+    if cached.format_version != CACHE_FORMAT_VERSION
+        || cached.release != source.release
         || cached.module != source.module.label()
         || cached.source_url != source.index_url.as_str()
     {
@@ -53,6 +58,7 @@ pub fn store(source: &OracleSource, tables: &[CatalogTable]) -> Result<PathBuf> 
     let path = cache_path(source)?;
     paths::ensure_parent_directory(&path)?;
     let cached = CachedCatalog {
+        format_version: CACHE_FORMAT_VERSION,
         release: source.release.clone(),
         module: source.module.label().to_owned(),
         source_url: source.index_url.to_string(),
@@ -83,7 +89,8 @@ pub fn store(source: &OracleSource, tables: &[CatalogTable]) -> Result<PathBuf> 
 pub fn read_path(source: &OracleSource, path: &Path) -> Result<Vec<CatalogTable>> {
     let bytes = fs::read(path).context("could not read sync cache")?;
     let cached = decode(&bytes).context("could not decode sync cache")?;
-    if cached.release != source.release
+    if cached.format_version != CACHE_FORMAT_VERSION
+        || cached.release != source.release
         || cached.module != source.module.label()
         || cached.source_url != source.index_url.as_str()
     {
@@ -126,6 +133,7 @@ mod tests {
             ..CatalogTable::default()
         }];
         let cached = CachedCatalog {
+            format_version: CACHE_FORMAT_VERSION,
             release: source.release.clone(),
             module: source.module.label().to_owned(),
             source_url: source.index_url.to_string(),
@@ -143,6 +151,7 @@ mod tests {
     fn rejects_cache_from_another_source() {
         let source = OracleSource::help_center(OracleModule::Hcm, "26B").expect("source");
         let cached = CachedCatalog {
+            format_version: CACHE_FORMAT_VERSION,
             release: "26B".to_owned(),
             module: "HCM".to_owned(),
             source_url: "https://example.invalid".to_owned(),

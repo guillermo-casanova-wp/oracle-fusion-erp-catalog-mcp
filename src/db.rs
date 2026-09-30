@@ -605,14 +605,19 @@ impl Database {
         }
 
         tx.execute("DELETE FROM indexes WHERE table_id = ?1", params![table_id])?;
+        let mut index_names = BTreeSet::new();
         for index in &table.indexes {
+            let index_name = index.index_name.trim().to_ascii_uppercase();
+            if !index_names.insert(index_name.clone()) {
+                continue;
+            }
             tx.execute(
                 "INSERT INTO indexes
                  (table_id, index_name, indexed_columns, is_unique)
                  VALUES (?1, upper(?2), ?3, ?4)",
                 params![
                     table_id,
-                    index.index_name,
+                    index_name,
                     index.indexed_columns.join(","),
                     index.is_unique
                 ],
@@ -1090,6 +1095,38 @@ mod tests {
             .expect("existing table");
         assert_eq!(structure.table.table_name, "PO_HEADERS_ALL");
         assert_eq!(structure.columns[0].data_type, "NUMBER");
+    }
+
+    #[test]
+    fn deduplicates_index_names_before_insert() {
+        let db = Database::in_memory().expect("in-memory SQLite");
+        let version_id = db.create_version("26B", true).expect("release");
+        let mut table = sample_table("PO_HEADERS_ALL");
+        table.indexes = vec![
+            CatalogIndex {
+                index_name: "po_headers_all_u1".to_owned(),
+                indexed_columns: vec!["ID".to_owned()],
+                is_unique: true,
+            },
+            CatalogIndex {
+                index_name: "PO_HEADERS_ALL_U1".to_owned(),
+                indexed_columns: vec!["ID".to_owned()],
+                is_unique: true,
+            },
+        ];
+
+        db.upsert_catalog_table(version_id, &table)
+            .expect("duplicate index names are ignored");
+        let count: i64 = db
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM indexes
+                 WHERE table_id = (SELECT id FROM tables WHERE table_name = 'PO_HEADERS_ALL')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("index count");
+        assert_eq!(count, 1);
     }
 
     #[test]
