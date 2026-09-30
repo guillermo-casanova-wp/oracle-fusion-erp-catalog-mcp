@@ -77,6 +77,19 @@ scripts/release.sh 0.2.0 --dry-run
 The GitHub workflow updates the package version, creates the tag, builds the
 platform binaries, generates checksums, and publishes the GitHub release.
 
+## Make targets
+
+Common workflows are available through the `Makefile`:
+
+```sh
+make verify
+make sync RELEASE=26B MODULE=scm
+make install AGENT=cursor DATABASE="$HOME/.local/share/oracle-fusion-erp-catalog-mcp/catalog.sqlite"
+make release VERSION=0.2.0
+```
+
+Use `DRY_RUN=1` with `make release` to preview the workflow trigger.
+
 ## MCP usage
 
 With no subcommand, the installed binary speaks JSON-RPC 2.0 over stdin/stdout.
