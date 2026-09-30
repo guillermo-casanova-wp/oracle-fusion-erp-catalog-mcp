@@ -22,6 +22,18 @@ These instructions apply to the entire project.
   Cursor, Claude Code, Codex CLI, or OpenCode.
 - `--help` and `--version` are available at the top level and for subcommands.
 
+## Git workflow
+
+- Never work directly on `main` or the production branch.
+- Create a focused branch for every change, using a descriptive name such as
+  `feat/platform-db-paths` or `fix/mcp-config`.
+- Review the complete diff before merging, including tests, configuration, and
+  documentation changes.
+- Run the required verification commands on the branch before requesting a
+  merge.
+- Merge to the production branch only after review and successful verification.
+- Keep commits focused and use Conventional Commit messages.
+
 ## Conventions
 
 - Use stable Rust, `cargo fmt`, and `cargo test` before delivering changes.
