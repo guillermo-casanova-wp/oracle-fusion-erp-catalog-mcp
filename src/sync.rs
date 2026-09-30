@@ -11,6 +11,7 @@ use url::Url;
 pub enum OracleModule {
     Financials,
     Scm,
+    Hcm,
 }
 
 impl OracleModule {
@@ -18,6 +19,7 @@ impl OracleModule {
         match self {
             Self::Financials => "financials",
             Self::Scm => "supply-chain-and-manufacturing",
+            Self::Hcm => "human-resources",
         }
     }
 
@@ -25,6 +27,7 @@ impl OracleModule {
         match self {
             Self::Financials => "oedmf",
             Self::Scm => "oedsc",
+            Self::Hcm => "oedmh",
         }
     }
 
@@ -32,6 +35,7 @@ impl OracleModule {
         match self {
             Self::Financials => "FINANCIALS",
             Self::Scm => "SCM",
+            Self::Hcm => "HCM",
         }
     }
 }
@@ -480,6 +484,16 @@ mod tests {
             parse_release_code("26B").expect("release"),
             ReleaseCode { year: 26, cycle: 1 }
         );
+    }
+
+    #[test]
+    fn builds_hcm_help_center_source() {
+        let source = OracleSource::help_center(OracleModule::Hcm, "26B").expect("HCM source");
+        assert_eq!(
+            source.index_url.as_str(),
+            "https://docs.oracle.com/en/cloud/saas/human-resources/26b/oedmh/index.html"
+        );
+        assert_eq!(OracleModule::Hcm.label(), "HCM");
     }
 
     #[test]

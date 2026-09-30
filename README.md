@@ -57,16 +57,38 @@ default database location. Without an override, the database is stored as
 
 ## Sync
 
-Synchronize both Financials and SCM from the Oracle Help Center:
+Synchronize Financials, SCM, and HCM from the Oracle Help Center:
 
 ```sh
-oracle-fusion-erp-catalog-mcp sync --release 26B
+oracle-fusion-erp-catalog-mcp sync --release 26B --module all
 ```
 
-Use `--module financials|scm`, `--no-activate`, or `--replace` as needed.
+Use `--module financials|scm|hcm|all`, `--no-activate`, or `--replace` as
+needed. This command is intended for catalog generation and can take a long
+time because it downloads the Oracle guides.
 Synchronization activates newer releases and removes the previous active
 release after success; a missing module can be merged into an existing release.
 The database path is controlled by `ORACLE_MCP_DATABASE`.
+
+### Distribute a generated catalog
+
+Catalog generation is performed once by a maintainer. It is not repeated when
+the binary is installed or updated:
+
+```sh
+ORACLE_MCP_DATABASE="$PWD/catalog-26B.sqlite" \
+  oracle-fusion-erp-catalog-mcp sync --release 26B --module all
+make catalog-release RELEASE=26B DATABASE="$PWD/catalog-26B.sqlite"
+```
+
+The `make catalog-release` target compresses the SQLite file, creates a
+manifest and SHA-256 checksum, and publishes a separate GitHub Release named
+`catalog-26B`. It requires the GitHub CLI to be authenticated. End users can
+install that pre-generated catalog without running synchronization:
+
+```sh
+oracle-fusion-erp-catalog-mcp catalog install --release 26B
+```
 
 ## MCP usage
 

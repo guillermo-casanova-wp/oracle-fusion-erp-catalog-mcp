@@ -1,4 +1,5 @@
 use indicatif::{ProgressBar, ProgressStyle};
+use oracle_fusion_erp_catalog_mcp::catalog;
 use oracle_fusion_erp_catalog_mcp::db::Database;
 use oracle_fusion_erp_catalog_mcp::install;
 use oracle_fusion_erp_catalog_mcp::paths;
@@ -58,6 +59,13 @@ async fn main() -> io::Result<()> {
         Some("update") => update::run(&args[1..])
             .await
             .map_err(|error| io::Error::other(error.to_string())),
+        Some("catalog") if matches!(args.get(1).map(String::as_str), Some("-h" | "--help")) => {
+            println!("{}", catalog_help());
+            Ok(())
+        }
+        Some("catalog") => run_catalog_command(&args[1..])
+            .await
+            .map_err(|error| io::Error::other(error.to_string())),
         Some("sync") if matches!(args.get(1).map(String::as_str), Some("-h" | "--help")) => {
             println!("{}", sync_help());
             Ok(())
@@ -79,6 +87,12 @@ fn cli_help() -> &'static str {
 Usage:\n  oracle-fusion-erp-catalog-mcp [OPTIONS]\n  oracle-fusion-erp-catalog-mcp install AGENT [OPTIONS]\n  oracle-fusion-erp-catalog-mcp update [OPTIONS]\n  oracle-fusion-erp-catalog-mcp sync --release RELEASE [OPTIONS]\n\n\
 Options:\n  -h, --help       Show this help\n  -V, --version    Show the version\n\n\
 With no command, the process starts the MCP server."
+}
+
+fn catalog_help() -> &'static str {
+    "Install a pre-generated Oracle catalog into SQLite\n\n\
+Usage:\n  oracle-fusion-erp-catalog-mcp catalog install --release RELEASE\n\n\
+The catalog is downloaded from GitHub Releases and validated before installation."
 }
 
 fn update_help() -> &'static str {
@@ -112,7 +126,45 @@ fn run_install_command(args: &[String]) -> io::Result<()> {
 fn sync_help() -> &'static str {
     "Synchronize an Oracle release into SQLite\n\n\
 Usage:\n  oracle-fusion-erp-catalog-mcp sync --release RELEASE [OPTIONS]\n\n\
-Options:\n  --release RELEASE             Oracle release, such as 26B\n  --module financials|scm|all    Module to synchronize\n  --no-activate                  Keep the synchronized release inactive\n  --replace                      Delete the existing target release before syncing\n  -h, --help                     Show this help\n  -V, --version                  Show the version"
+Options:\n  --release RELEASE              Oracle release, such as 26B\n  --module financials|scm|hcm|all Module to synchronize\n  --no-activate                   Keep the synchronized release inactive\n  --replace                       Delete the existing target release before syncing\n  -h, --help                      Show this help\n  -V, --version                   Show the version"
+}
+
+async fn run_catalog_command(args: &[String]) -> anyhow::Result<()> {
+    if args.first().map(String::as_str) != Some("install") {
+        return Err(anyhow::anyhow!("catalog requires the install subcommand"));
+    }
+
+    let mut release = None;
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--release" => {
+                index += 1;
+                release = Some(
+                    args.get(index)
+                        .filter(|value| !value.trim().is_empty())
+                        .ok_or_else(|| anyhow::anyhow!("--release requires a value"))?
+                        .to_ascii_uppercase(),
+                );
+            }
+            "-h" | "--help" => {
+                println!("{}", catalog_help());
+                return Ok(());
+            }
+            value => return Err(anyhow::anyhow!("unsupported catalog argument {value}")),
+        }
+        index += 1;
+    }
+
+    let release = release.ok_or_else(|| anyhow::anyhow!("catalog install requires --release"))?;
+    let database_path = paths::database_path()?;
+    let installed = catalog::install(&release, &database_path).await?;
+    if installed {
+        eprintln!("installed catalog release {release}");
+    } else {
+        eprintln!("catalog release {release} is already installed");
+    }
+    Ok(())
 }
 
 async fn run_sync_command(args: &[String]) -> anyhow::Result<()> {
@@ -170,7 +222,11 @@ async fn run_sync_command(args: &[String]) -> anyhow::Result<()> {
 
 fn parse_sync_args(args: &[String]) -> anyhow::Result<(String, Vec<OracleModule>, bool, bool)> {
     let mut release = None;
-    let mut modules = vec![OracleModule::Financials, OracleModule::Scm];
+    let mut modules = vec![
+        OracleModule::Financials,
+        OracleModule::Scm,
+        OracleModule::Hcm,
+    ];
     let mut activate = true;
     let mut replace = false;
     let mut index = 0;
@@ -193,10 +249,15 @@ fn parse_sync_args(args: &[String]) -> anyhow::Result<(String, Vec<OracleModule>
                 modules = match value.to_ascii_lowercase().as_str() {
                     "financials" => vec![OracleModule::Financials],
                     "scm" => vec![OracleModule::Scm],
-                    "all" => vec![OracleModule::Financials, OracleModule::Scm],
+                    "hcm" => vec![OracleModule::Hcm],
+                    "all" => vec![
+                        OracleModule::Financials,
+                        OracleModule::Scm,
+                        OracleModule::Hcm,
+                    ],
                     _ => {
                         return Err(anyhow::anyhow!(
-                            "unsupported module {value}; use financials, scm, or all"
+                            "unsupported module {value}; use financials, scm, hcm, or all"
                         ))
                     }
                 };
@@ -205,7 +266,7 @@ fn parse_sync_args(args: &[String]) -> anyhow::Result<(String, Vec<OracleModule>
             "--replace" => replace = true,
             "-h" | "--help" => {
                 eprintln!(
-                    "Usage: cargo run -- sync --release RELEASE [--module financials|scm|all] [--no-activate] [--replace]"
+                    "Usage: cargo run -- sync --release RELEASE [--module financials|scm|hcm|all] [--no-activate] [--replace]"
                 );
                 return Err(anyhow::anyhow!("help requested"));
             }
@@ -542,6 +603,25 @@ mod tests {
         assert_eq!(modules, vec![OracleModule::Scm]);
         assert!(!activate);
         assert!(!replace);
+    }
+
+    #[test]
+    fn all_syncs_financials_scm_and_hcm() {
+        let args = vec![
+            "--release".to_owned(),
+            "26B".to_owned(),
+            "--module".to_owned(),
+            "all".to_owned(),
+        ];
+        let (_, modules, _, _) = parse_sync_args(&args).expect("sync options");
+        assert_eq!(
+            modules,
+            vec![
+                OracleModule::Financials,
+                OracleModule::Scm,
+                OracleModule::Hcm
+            ]
+        );
     }
 
     #[test]

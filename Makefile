@@ -2,15 +2,18 @@ SHELL := /bin/sh
 
 BUMP ?= patch
 DRY_RUN ?=
+RELEASE ?=
+DATABASE ?= catalog.sqlite
 
-.PHONY: help verify compile check test release
+.PHONY: help verify compile check test release catalog-release
 
 help:
 	@printf '%s\n' \
 		'Available targets:' \
 		'  make verify' \
 		'  make compile' \
-		'  make release [BUMP=patch|minor|major] [DRY_RUN=1]'
+		'  make release [BUMP=patch|minor|major] [DRY_RUN=1]' \
+		'  make catalog-release RELEASE=26B DATABASE=path/to/catalog.sqlite'
 
 verify:
 	cargo fmt --all -- --check
@@ -34,3 +37,8 @@ release:
 	else \
 		scripts/release.sh --bump "$(BUMP)" --yes; \
 	fi
+
+catalog-release:
+	@test -n "$(RELEASE)" || \
+		(printf '%s\n' 'RELEASE is required, for example RELEASE=26B' >&2; exit 2)
+	scripts/catalog-release.sh --release "$(RELEASE)" --database "$(DATABASE)"
