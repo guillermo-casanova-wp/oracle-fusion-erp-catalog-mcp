@@ -119,7 +119,8 @@ impl Database {
         Self::open(":memory:")
     }
 
-    fn migrate_legacy_schema(&self) -> SqlResult<()> {
+    fn migrate_legacy_schema(&self) -> SqlResult<bool> {
+        let mut migrated = false;
         for (old_name, new_name) in [
             ("tabla_versiones", "versions"),
             ("tablas", "tables"),
@@ -132,6 +133,7 @@ impl Database {
             if old_exists && !new_exists {
                 self.connection
                     .execute_batch(&format!("ALTER TABLE {old_name} RENAME TO {new_name};"))?;
+                migrated = true;
             }
         }
 
@@ -172,16 +174,22 @@ impl Database {
                 self.connection.execute_batch(&format!(
                     "ALTER TABLE {table} RENAME COLUMN {old_name} TO {new_name};"
                 ))?;
+                migrated = true;
             }
         }
 
-        self.connection.execute_batch(
-            "DROP TABLE IF EXISTS tablas_fts;
-             DROP TABLE IF EXISTS tables_fts;
-             DROP INDEX IF EXISTS idx_tablas_version_modulo;
-             DROP INDEX IF EXISTS idx_columnas_tabla;",
-        )?;
-        Ok(())
+        if self.table_exists("tablas_fts")? {
+            self.connection.execute_batch("DROP TABLE tablas_fts;")?;
+            migrated = true;
+        }
+        if migrated {
+            self.connection.execute_batch(
+                "DROP TABLE IF EXISTS tables_fts;
+                 DROP INDEX IF EXISTS idx_tablas_version_modulo;
+                 DROP INDEX IF EXISTS idx_columnas_tabla;",
+            )?;
+        }
+        Ok(migrated)
     }
 
     fn table_exists(&self, name: &str) -> SqlResult<bool> {
@@ -208,7 +216,7 @@ impl Database {
     }
 
     fn migrate(&self) -> SqlResult<()> {
-        self.migrate_legacy_schema()?;
+        let rebuild_fts = self.migrate_legacy_schema()?;
         self.connection.execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS versions (
@@ -269,13 +277,15 @@ impl Database {
                 ON columns(table_id);
             "#,
         )?;
-        let version_ids: Vec<i64> = self
-            .connection
-            .prepare("SELECT id FROM versions")?
-            .query_map([], |row| row.get(0))?
-            .collect::<SqlResult<Vec<_>>>()?;
-        for version_id in version_ids {
-            self.rebuild_fts(version_id)?;
+        if rebuild_fts {
+            let version_ids: Vec<i64> = self
+                .connection
+                .prepare("SELECT id FROM versions")?
+                .query_map([], |row| row.get(0))?
+                .collect::<SqlResult<Vec<_>>>()?;
+            for version_id in version_ids {
+                self.rebuild_fts(version_id)?;
+            }
         }
         Ok(())
     }
