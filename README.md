@@ -62,20 +62,18 @@ The database path is controlled by `ORACLE_MCP_DATABASE`.
 Run the complete release workflow from an up-to-date `main` branch:
 
 ```sh
-scripts/release.sh 0.2.0
+scripts/release.sh --bump patch
 ```
 
-The script validates the version and branch state, triggers the GitHub Actions
-release workflow, waits for completion, and prints the published release URL.
-The workflow runs the project checks. Preview the workflow trigger without
-publishing with:
+The script finds the latest `v*` tag, calculates the next patch, minor, or
+major version, updates `Cargo.toml` and `Cargo.lock`, creates the release
+commit and tag, and pushes both to GitHub. The tag triggers the release
+workflow, which validates the version, builds the platform binaries, generates
+checksums, and publishes the GitHub release. Preview without writing with:
 
 ```sh
-scripts/release.sh 0.2.0 --dry-run
+scripts/release.sh --bump minor --dry-run
 ```
-
-The GitHub workflow updates the package version, creates the tag, builds the
-platform binaries, generates checksums, and publishes the GitHub release.
 
 ## Make targets
 
@@ -83,10 +81,10 @@ Common workflows are available through the `Makefile`:
 
 ```sh
 make verify
-make release VERSION=0.2.0
+make release BUMP=patch
 ```
 
-Use `DRY_RUN=1` with `make release` to preview the workflow trigger.
+Use `DRY_RUN=1` with `make release` to preview the release calculation.
 Use the binary's `sync` and `install` subcommands directly for those
 operations.
 
