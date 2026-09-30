@@ -96,6 +96,3 @@ For optional local coverage, install `cargo-llvm-cov` and run:
 cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info
 ```
 
-GitHub Actions runs formatting, Clippy, tests, and coverage on pushes to `main`
-and pull requests. Release artifacts are built and published only by the
-GitHub Actions release workflow.
