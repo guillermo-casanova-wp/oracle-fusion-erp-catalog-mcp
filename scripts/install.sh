@@ -70,7 +70,19 @@ fi
 
 [ -n "$asset" ] || asset="${repo}-${os}-${arch}"
 case "$version" in
-    latest) url="https://github.com/${owner}/${repo}/releases/latest/download/${asset}" ;;
+    latest)
+        api_url="https://api.github.com/repos/${owner}/${repo}/releases?per_page=100"
+        latest_tag=$(
+            curl --fail --location --silent --show-error "$api_url" |
+                sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\(v[0-9][0-9A-Za-z.-]*\)".*/\1/p' |
+                head -n 1
+        )
+        if [ -z "$latest_tag" ]; then
+            echo "error: could not find a published binary release" >&2
+            exit 1
+        fi
+        url="https://github.com/${owner}/${repo}/releases/download/${latest_tag}/${asset}"
+        ;;
     v*) url="https://github.com/${owner}/${repo}/releases/download/${version}/${asset}" ;;
     *) url="https://github.com/${owner}/${repo}/releases/download/v${version}/${asset}" ;;
 esac
