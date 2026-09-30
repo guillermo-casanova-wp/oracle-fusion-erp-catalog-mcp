@@ -1,6 +1,7 @@
 use indicatif::{ProgressBar, ProgressStyle};
 use oracle_fusion_erp_catalog_mcp::db::Database;
 use oracle_fusion_erp_catalog_mcp::install;
+use oracle_fusion_erp_catalog_mcp::paths;
 use oracle_fusion_erp_catalog_mcp::sync::{
     self, synchronize_with_progress, OracleExtractor, OracleModule,
 };
@@ -102,8 +103,7 @@ Options:\n  --release RELEASE             Oracle release, such as 26B\n  --modul
 
 async fn run_sync_command(args: &[String]) -> anyhow::Result<()> {
     let (release, modules, activate, replace) = parse_sync_args(args)?;
-    let database_path =
-        env::var("ORACLE_MCP_DATABASE").unwrap_or_else(|_| "oracle-erp-mcp.sqlite".to_owned());
+    let database_path = paths::database_path()?;
     let database = Database::open(&database_path)?;
     let extractor = OracleExtractor::new()?;
     let mut tables = Vec::new();
@@ -205,8 +205,8 @@ fn parse_sync_args(args: &[String]) -> anyhow::Result<(String, Vec<OracleModule>
 }
 
 async fn run_mcp() -> io::Result<()> {
-    let database_path =
-        env::var("ORACLE_MCP_DATABASE").unwrap_or_else(|_| "oracle-erp-mcp.sqlite".to_owned());
+    let database_path = paths::database_path()
+        .map_err(|error| io::Error::new(io::ErrorKind::Other, error.to_string()))?;
     let database = match Database::open(&database_path) {
         Ok(database) => database,
         Err(error) => {

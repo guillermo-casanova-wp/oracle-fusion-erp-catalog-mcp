@@ -52,8 +52,16 @@ Use `--agent none` to install only the binary. Other useful options include
 `--asset NAME`. Forks can override the release source with `--owner` and
 `--repo`.
 
-The SQLite path is configured with `ORACLE_MCP_DATABASE`; the installer defaults
-to `$PWD/oracle-fusion-erp-catalog-mcp.sqlite`.
+The SQLite path is configured with `ORACLE_MCP_DATABASE`. Without an override,
+the database is stored in the platform user-data directory:
+
+- macOS: `~/Library/Application Support/oracle-fusion-erp-catalog-mcp/catalog.sqlite`
+- Linux: `${XDG_DATA_HOME:-~/.local/share}/oracle-fusion-erp-catalog-mcp/catalog.sqlite`
+- Windows: `%LOCALAPPDATA%\oracle-fusion-erp-catalog-mcp\catalog.sqlite`
+
+While existing data is being processed, an existing `oracle-erp-mcp.sqlite` in
+the current directory is used as a temporary legacy fallback. An explicit
+`ORACLE_MCP_DATABASE` path always takes precedence.
 
 Logs are written to stderr. stdout is reserved for MCP messages.
 
@@ -129,5 +137,11 @@ binary.
 cargo build --release
 cargo fmt --all -- --check
 cargo check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test
+cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info
 ```
+
+GitHub Actions runs the same formatting, Clippy, test, and coverage checks on
+pushes to `main` and pull requests. The generated `lcov.info` report is
+available as the `rust-coverage-lcov` workflow artifact.

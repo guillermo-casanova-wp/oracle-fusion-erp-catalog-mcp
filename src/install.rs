@@ -1,3 +1,4 @@
+use crate::paths;
 use anyhow::{anyhow, Context, Result};
 use serde_json::{Map, Value};
 #[cfg(unix)]
@@ -60,7 +61,7 @@ pub fn help() -> &'static str {
     "Register the MCP server in agent configuration files\n\n\
 Usage: oracle-fusion-erp-catalog-mcp install AGENT [OPTIONS]\n\n\
 AGENT:\n  cursor | claude-code | codex | opencode | all\n\n\
-Options:\n  --binary PATH       Server executable (default: current executable)\n  --database PATH     SQLite database (default: oracle-erp-mcp.sqlite)\n  --dry-run           Show changes without writing files\n  -h, --help          Show this help\n  -V, --version       Show the version"
+Options:\n  --binary PATH       Server executable (default: current executable)\n  --database PATH     SQLite database (default: platform data directory)\n  --dry-run           Show changes without writing files\n  -h, --help          Show this help\n  -V, --version       Show the version"
 }
 
 pub fn parse_args(args: &[String]) -> Result<InstallOptions> {
@@ -79,7 +80,7 @@ pub fn parse_args(args: &[String]) -> Result<InstallOptions> {
         vec![Agent::parse(agent_name)?]
     };
     let mut binary = env::current_exe().context("could not determine current executable")?;
-    let mut database = PathBuf::from("oracle-erp-mcp.sqlite");
+    let mut database = paths::database_path()?;
     let mut dry_run = false;
     let mut index = 1;
     while index < args.len() {
@@ -174,16 +175,12 @@ fn command_value(options: &InstallOptions) -> Value {
     })
 }
 
-fn update_json_config(path: &Path, agent: Agent, options: &InstallOptions) -> Result<WriteStatus> {
+fn update_json_config(path: &Path, _agent: Agent, options: &InstallOptions) -> Result<WriteStatus> {
     let mut root = read_json(path)?;
     let object = root
         .as_object_mut()
         .ok_or_else(|| anyhow!("{} must contain a JSON object", path.display()))?;
-    let key = if agent == Agent::Cursor || agent == Agent::ClaudeCode {
-        "mcpServers"
-    } else {
-        "mcpServers"
-    };
+    let key = "mcpServers";
     let servers = object
         .entry(key)
         .or_insert_with(|| Value::Object(Map::new()))

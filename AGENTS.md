@@ -22,6 +22,10 @@ These instructions apply to the entire project.
 - Queries must be limited to the active version unless a function explicitly
   specifies another version.
 - Sanitize terms before building FTS5 queries.
+- Resolve the default SQLite path through the platform user-data directory;
+  `ORACLE_MCP_DATABASE` takes precedence, and the legacy
+  `oracle-erp-mcp.sqlite` fallback remains temporary while existing data is
+  being processed.
 
 ## Verification
 

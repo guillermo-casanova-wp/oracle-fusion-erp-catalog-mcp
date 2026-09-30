@@ -1,3 +1,4 @@
+use crate::paths::ensure_parent_directory;
 use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, path::Path};
@@ -102,6 +103,11 @@ pub struct Database {
 
 impl Database {
     pub fn open(path: impl AsRef<Path>) -> SqlResult<Self> {
+        let path = path.as_ref();
+        if path != Path::new(":memory:") {
+            ensure_parent_directory(path)
+                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+        }
         let connection = Connection::open(path)?;
         connection.execute_batch("PRAGMA foreign_keys = ON;")?;
         let db = Self { connection };
@@ -624,7 +630,7 @@ impl Database {
             indexes.push(row?);
         }
         Ok(Some(TableStructure {
-            table: table,
+            table,
             columns,
             outgoing_references,
             incoming_references,
