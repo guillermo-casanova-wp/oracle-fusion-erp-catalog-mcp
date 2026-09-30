@@ -113,6 +113,7 @@ commands above use the installed binary.
 
 ```sh
 make verify
+make compile
 make check
 make test
 ```
