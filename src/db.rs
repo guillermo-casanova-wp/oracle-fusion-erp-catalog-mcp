@@ -1404,6 +1404,13 @@ fn delete_stale_module_tables(
                SELECT 1 FROM sync_keep
                WHERE sync_keep.module = tables.module
                  AND sync_keep.table_name = tables.table_name
+           )
+           AND NOT EXISTS (
+               SELECT 1
+               FROM foreign_key_references referenced
+               JOIN tables source ON source.id = referenced.source_table_id
+               WHERE referenced.target_table_id = tables.id
+                 AND source.module NOT IN (SELECT module FROM sync_keep)
            )",
         params![version_id],
     )?;

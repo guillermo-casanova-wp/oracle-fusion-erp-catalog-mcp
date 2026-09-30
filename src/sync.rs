@@ -788,6 +788,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::CatalogReference;
 
     fn catalog_table(module: &str, table_name: &str) -> CatalogTable {
         CatalogTable {
@@ -1038,5 +1039,46 @@ mod tests {
         assert!(modules.contains("SCM"));
         assert!(modules.contains("FINANCIALS"));
         assert!(db.version_by_release("26B").expect("old").is_none());
+    }
+
+    #[test]
+    fn keeps_foreign_keys_from_an_unsynced_module_when_a_target_drops() {
+        let db = Database::in_memory().expect("in-memory SQLite");
+        let version_id = db.create_version("26B", true).expect("release");
+        db.upsert_catalog_table(version_id, &catalog_table("SCM", "SCM_KEEP"))
+            .expect("kept scm");
+        db.upsert_catalog_table(version_id, &catalog_table("SCM", "SCM_DROP"))
+            .expect("dropped scm");
+        db.upsert_catalog_table(version_id, &catalog_table("SCM", "SCM_UNUSED"))
+            .expect("unused scm");
+        let mut financials = catalog_table("FINANCIALS", "FIN_HDR");
+        financials.references = vec![
+            CatalogReference {
+                target_table: "SCM_KEEP".to_owned(),
+                source_column: "KEEP_ID".to_owned(),
+                target_column: None,
+                constraint_name: None,
+            },
+            CatalogReference {
+                target_table: "SCM_DROP".to_owned(),
+                source_column: "DROP_ID".to_owned(),
+                target_column: None,
+                constraint_name: None,
+            },
+        ];
+        db.upsert_catalog_table(version_id, &financials)
+            .expect("financials");
+
+        synchronize(&db, "26C", vec![catalog_table("SCM", "SCM_KEEP")], true).expect("upgrade");
+
+        let kept = db.suggest_joins("FIN_HDR", "SCM_KEEP").expect("kept join");
+        let dropped = db
+            .suggest_joins("FIN_HDR", "SCM_DROP")
+            .expect("dropped join");
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].source_column, "KEEP_ID");
+        assert_eq!(dropped.len(), 1);
+        assert_eq!(dropped[0].source_column, "DROP_ID");
+        assert!(db.table_structure("SCM_UNUSED").expect("lookup").is_none());
     }
 }
