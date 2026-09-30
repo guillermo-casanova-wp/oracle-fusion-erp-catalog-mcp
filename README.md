@@ -62,24 +62,6 @@ Synchronization activates newer releases and removes the previous active
 release after success; a missing module can be merged into an existing release.
 The database path is controlled by `ORACLE_MCP_DATABASE`.
 
-## Release
-
-Run the complete release workflow from an up-to-date `main` branch:
-
-```sh
-scripts/release.sh --bump patch
-```
-
-The script finds the latest `v*` tag, calculates the next patch, minor, or
-major version, updates `Cargo.toml` and `Cargo.lock`, creates the release
-commit and tag, and pushes both to GitHub. The tag triggers the release
-workflow, which validates the version, builds the platform binaries, generates
-checksums, and publishes the GitHub release. Preview without writing with:
-
-```sh
-scripts/release.sh --bump minor --dry-run
-```
-
 ## Make targets
 
 Common workflows are available through the `Makefile`:
