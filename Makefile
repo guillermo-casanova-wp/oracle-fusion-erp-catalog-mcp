@@ -3,18 +3,22 @@ SHELL := /bin/sh
 VERSION ?=
 DRY_RUN ?=
 
-.PHONY: help verify check test release
+.PHONY: help verify compile check test release
 
 help:
 	@printf '%s\n' \
 		'Available targets:' \
 		'  make verify' \
+		'  make compile' \
 		'  make release VERSION=0.2.0 [DRY_RUN=1]'
 
 verify:
 	cargo fmt --all -- --check
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
 	cargo test --workspace
+
+compile:
+	cargo build
 
 check:
 	cargo check
