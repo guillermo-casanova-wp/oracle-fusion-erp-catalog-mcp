@@ -102,8 +102,8 @@ Options:\n  --release RELEASE             Oracle release, such as 26B\n  --modul
 
 async fn run_sync_command(args: &[String]) -> anyhow::Result<()> {
     let (release, modules, activate, replace) = parse_sync_args(args)?;
-    let database_path = env::var("ORACLE_MCP_DATABASE")
-        .unwrap_or_else(|_| "oracle-fusion-erp-catalog-mcp.sqlite".to_owned());
+    let database_path =
+        env::var("ORACLE_MCP_DATABASE").unwrap_or_else(|_| "oracle-erp-mcp.sqlite".to_owned());
     let database = Database::open(&database_path)?;
     let extractor = OracleExtractor::new()?;
     let mut tables = Vec::new();
@@ -179,8 +179,8 @@ fn parse_sync_args(args: &[String]) -> anyhow::Result<(String, Vec<OracleModule>
 }
 
 async fn run_mcp() -> io::Result<()> {
-    let database_path = env::var("ORACLE_MCP_DATABASE")
-        .unwrap_or_else(|_| "oracle-fusion-erp-catalog-mcp.sqlite".to_owned());
+    let database_path =
+        env::var("ORACLE_MCP_DATABASE").unwrap_or_else(|_| "oracle-erp-mcp.sqlite".to_owned());
     let database = match Database::open(&database_path) {
         Ok(database) => database,
         Err(error) => {

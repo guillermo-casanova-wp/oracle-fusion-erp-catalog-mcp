@@ -1,7 +1,7 @@
-# Oracle ERP MCP
+# Oracle Fusion ERP Catalog MCP
 
-Rust MCP server for querying the Oracle Fusion Cloud Financials and SCM
-technical dictionary through SQLite and FTS5.
+Oracle Fusion ERP Catalog MCP is a Rust MCP server for querying the Oracle
+Fusion Cloud Financials and SCM technical dictionary through SQLite and FTS5.
 
 ## Status
 
@@ -36,7 +36,7 @@ cargo run --release
 ```
 
 The SQLite path is configured with `ORACLE_MCP_DATABASE`; the default is
-`oracle-fusion-erp-catalog-mcp.sqlite`.
+`oracle-erp-mcp.sqlite`.
 
 Logs are written to stderr. stdout is reserved for MCP messages.
 
@@ -46,7 +46,7 @@ Register the server globally in Cursor, Claude Code, Codex CLI, or OpenCode:
 
 ```sh
 cargo install --path .
-oracle-fusion-erp-catalog-mcp install all --binary "$(command -v oracle-fusion-erp-catalog-mcp)" --database "$PWD/oracle-fusion-erp-catalog-mcp.sqlite"
+oracle-fusion-erp-catalog-mcp install all --binary "$(command -v oracle-fusion-erp-catalog-mcp)" --database "$PWD/oracle-erp-mcp.sqlite"
 ```
 
 Replace `all` with `cursor`, `claude-code`, `codex`, or `opencode` to select one

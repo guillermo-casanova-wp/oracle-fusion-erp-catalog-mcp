@@ -1,4 +1,4 @@
-# Oracle ERP MCP — Agent Instructions
+# Oracle Fusion ERP Catalog MCP — Agent Instructions
 
 ## Scope
 

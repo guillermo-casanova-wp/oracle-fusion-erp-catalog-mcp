@@ -73,7 +73,7 @@ impl OracleExtractor {
     pub fn new() -> Result<Self> {
         Ok(Self {
             client: Client::builder()
-                .user_agent("oracle-erp-mcp/0.1")
+                .user_agent("oracle-fusion-erp-catalog-mcp/0.1")
                 .timeout(Duration::from_secs(30))
                 .build()?,
         })

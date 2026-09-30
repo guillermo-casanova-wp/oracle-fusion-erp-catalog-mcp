@@ -1,9 +1,10 @@
 {
   "mcpServers": {
     "oracle-fusion-erp-catalog-mcp": {
+      "type": "stdio",
       "command": "/Users/jer.ioet/WP/oracle-erp-mcp/target/release/oracle-fusion-erp-catalog-mcp",
       "env": {
-        "ORACLE_MCP_DATABASE": "/Users/jer.ioet/WP/oracle-erp-mcp/oracle-fusion-erp-catalog-mcp.sqlite"
+        "ORACLE_MCP_DATABASE": "/Users/jer.ioet/WP/oracle-erp-mcp/oracle-erp-mcp.sqlite"
       }
     }
   }

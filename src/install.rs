@@ -1,5 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use serde_json::{Map, Value};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::{
     env, fs,
     io::Write,
@@ -58,7 +60,7 @@ pub fn help() -> &'static str {
     "Register the MCP server in agent configuration files\n\n\
 Usage: oracle-fusion-erp-catalog-mcp install AGENT [OPTIONS]\n\n\
 AGENT:\n  cursor | claude-code | codex | opencode | all\n\n\
-Options:\n  --binary PATH       Server executable (default: current executable)\n  --database PATH     SQLite database (default: oracle-fusion-erp-catalog-mcp.sqlite)\n  --dry-run           Show changes without writing files\n  -h, --help          Show this help\n  -V, --version       Show the version"
+Options:\n  --binary PATH       Server executable (default: current executable)\n  --database PATH     SQLite database (default: oracle-erp-mcp.sqlite)\n  --dry-run           Show changes without writing files\n  -h, --help          Show this help\n  -V, --version       Show the version"
 }
 
 pub fn parse_args(args: &[String]) -> Result<InstallOptions> {
@@ -77,7 +79,7 @@ pub fn parse_args(args: &[String]) -> Result<InstallOptions> {
         vec![Agent::parse(agent_name)?]
     };
     let mut binary = env::current_exe().context("could not determine current executable")?;
-    let mut database = PathBuf::from("oracle-fusion-erp-catalog-mcp.sqlite");
+    let mut database = PathBuf::from("oracle-erp-mcp.sqlite");
     let mut dry_run = false;
     let mut index = 1;
     while index < args.len() {
@@ -105,6 +107,10 @@ pub fn parse_args(args: &[String]) -> Result<InstallOptions> {
     }
     if !binary.is_file() {
         return Err(anyhow!("binary path is not a file: {}", binary.display()));
+    }
+    binary = fs::canonicalize(binary)?;
+    if database.is_relative() {
+        database = env::current_dir()?.join(database);
     }
     Ok(InstallOptions {
         agents,
@@ -161,6 +167,7 @@ fn config_path(agent: Agent, home: &Path) -> PathBuf {
 
 fn command_value(options: &InstallOptions) -> Value {
     serde_json::json!({
+        "type": "stdio",
         "command": options.binary.to_string_lossy(),
         "args": [],
         "env": { "ORACLE_MCP_DATABASE": options.database.to_string_lossy() }
@@ -248,7 +255,8 @@ fn update_toml_config(path: &Path, options: &InstallOptions) -> Result<WriteStat
     if changed {
         servers.insert(SERVER_NAME.to_owned(), desired);
     }
-    write_text(path, &document.to_string(), options.dry_run, changed)
+    let content = toml::to_string_pretty(&document)?;
+    write_text(path, &content, options.dry_run, changed)
 }
 
 fn read_json(path: &Path) -> Result<Value> {
@@ -296,6 +304,15 @@ fn write_text(path: &Path, content: &str, dry_run: bool, changed: bool) -> Resul
         let mut file = fs::File::create(&temp)?;
         file.write_all(content.as_bytes())?;
         file.sync_all()?;
+    }
+    #[cfg(unix)]
+    {
+        let mode = if path.exists() {
+            fs::metadata(path)?.permissions().mode()
+        } else {
+            0o600
+        };
+        fs::set_permissions(&temp, fs::Permissions::from_mode(mode))?;
     }
     fs::rename(&temp, path).with_context(|| format!("could not replace {}", path.display()))?;
     Ok(WriteStatus::Changed)
@@ -347,6 +364,46 @@ mod tests {
             WriteStatus::Changed
         );
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn supports_claude_json_config() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("claude.json");
+        let options = options(dir.path(), false);
+        update_json_config(&path, Agent::ClaudeCode, &options).expect("write");
+        let value: Value =
+            serde_json::from_str(&fs::read_to_string(path).expect("read")).expect("json");
+        assert_eq!(value["mcpServers"][SERVER_NAME]["type"], "stdio");
+    }
+
+    #[test]
+    fn supports_codex_toml_config() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("config.toml");
+        fs::write(&path, "[other]\nkeep = true\n").expect("config");
+        let options = options(dir.path(), false);
+        update_toml_config(&path, &options).expect("write");
+        let value: toml::Value = fs::read_to_string(path)
+            .expect("read")
+            .parse()
+            .expect("toml");
+        assert_eq!(
+            value["mcp_servers"][SERVER_NAME]["env"]["ORACLE_MCP_DATABASE"].as_str(),
+            Some(options.database.to_string_lossy().as_ref())
+        );
+        assert_eq!(value["other"]["keep"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn supports_opencode_config() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("opencode.json");
+        let options = options(dir.path(), false);
+        update_opencode_config(&path, &options).expect("write");
+        let value: Value =
+            serde_json::from_str(&fs::read_to_string(path).expect("read")).expect("json");
+        assert_eq!(value["mcp"]["servers"][SERVER_NAME]["type"], "local");
     }
 
     #[test]
