@@ -36,9 +36,24 @@ cargo run --release
 ```
 
 The SQLite path is configured with `ORACLE_MCP_DATABASE`; the default is
-`oracle-erp-mcp.sqlite`.
+`oracle-fusion-erp-catalog-mcp.sqlite`.
 
 Logs are written to stderr. stdout is reserved for MCP messages.
+
+## Agent installation
+
+Register the server globally in Cursor, Claude Code, Codex CLI, or OpenCode:
+
+```sh
+cargo install --path .
+oracle-fusion-erp-catalog-mcp install all --binary "$(command -v oracle-fusion-erp-catalog-mcp)" --database "$PWD/oracle-fusion-erp-catalog-mcp.sqlite"
+```
+
+Replace `all` with `cursor`, `claude-code`, `codex`, or `opencode` to select one
+agent. Use `--dry-run` to preview changes. Installation creates missing parent
+folders, preserves unrelated configuration, updates the server entry
+idempotently, and atomically replaces changed files. The server is registered
+with the `ORACLE_MCP_DATABASE` environment variable.
 
 ## Synchronization
 
@@ -67,10 +82,10 @@ without reloading SCM.
 The CLI also provides:
 
 ```sh
-target/release/oracle-erp-mcp --help
-target/release/oracle-erp-mcp --version
-target/release/oracle-erp-mcp sync --help
-target/release/oracle-erp-mcp sync --version
+target/release/oracle-fusion-erp-catalog-mcp --help
+target/release/oracle-fusion-erp-catalog-mcp --version
+target/release/oracle-fusion-erp-catalog-mcp sync --help
+target/release/oracle-fusion-erp-catalog-mcp sync --version
 ```
 
 ## Initialization example

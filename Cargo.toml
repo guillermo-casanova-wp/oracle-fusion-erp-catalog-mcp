@@ -1,8 +1,8 @@
 [package]
-name = "oracle-erp-mcp"
+name = "oracle-fusion-erp-catalog-mcp"
 version = "0.1.0"
 edition = "2021"
-description = "MCP server and lexical RAG for the Oracle Fusion Cloud ERP technical dictionary"
+description = "Oracle Fusion ERP Catalog MCP server and lexical RAG technical dictionary"
 license = "MIT"
 
 [dependencies]
@@ -13,6 +13,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 scraper = "0.21"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "0.8"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "io-std", "io-util", "rt-multi-thread", "sync", "time"] }
 url = "2"

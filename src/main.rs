@@ -1,4 +1,5 @@
 mod db;
+mod install;
 mod sync;
 
 use db::Database;
@@ -59,27 +60,50 @@ async fn main() -> io::Result<()> {
         Some("sync") => run_sync_command(&args[1..])
             .await
             .map_err(|error| io::Error::new(io::ErrorKind::Other, error.to_string())),
+        Some("install") => run_install_command(&args[1..]),
         _ => run_mcp().await,
     }
 }
 
 fn cli_help() -> &'static str {
-    "Oracle ERP MCP\n\n\
-Usage:\n  oracle-erp-mcp [OPTIONS]\n  oracle-erp-mcp sync --release RELEASE [OPTIONS]\n\n\
+    "Oracle Fusion ERP Catalog MCP\n\n\
+Usage:\n  oracle-fusion-erp-catalog-mcp [OPTIONS]\n  oracle-fusion-erp-catalog-mcp install AGENT [OPTIONS]\n  oracle-fusion-erp-catalog-mcp sync --release RELEASE [OPTIONS]\n\n\
 Options:\n  -h, --help       Show this help\n  -V, --version    Show the version\n\n\
 With no command, the process starts the MCP server."
 }
 
+fn run_install_command(args: &[String]) -> io::Result<()> {
+    if args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "-h" | "--help"))
+    {
+        println!("{}", install::help());
+        return Ok(());
+    }
+    if args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "-V" | "--version"))
+    {
+        println!("{}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+    let options = install::parse_args(args)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
+    install::install(&options)
+        .map(|_| ())
+        .map_err(|error| io::Error::new(io::ErrorKind::Other, error.to_string()))
+}
+
 fn sync_help() -> &'static str {
     "Synchronize an Oracle release into SQLite\n\n\
-Usage:\n  oracle-erp-mcp sync --release RELEASE [OPTIONS]\n\n\
+Usage:\n  oracle-fusion-erp-catalog-mcp sync --release RELEASE [OPTIONS]\n\n\
 Options:\n  --release RELEASE             Oracle release, such as 26B\n  --module financials|scm|all    Module to synchronize\n  --no-activate                  Keep the synchronized release inactive\n  --replace                      Delete the existing target release before syncing\n  -h, --help                     Show this help\n  -V, --version                  Show the version"
 }
 
 async fn run_sync_command(args: &[String]) -> anyhow::Result<()> {
     let (release, modules, activate, replace) = parse_sync_args(args)?;
-    let database_path =
-        env::var("ORACLE_MCP_DATABASE").unwrap_or_else(|_| "oracle-erp-mcp.sqlite".to_owned());
+    let database_path = env::var("ORACLE_MCP_DATABASE")
+        .unwrap_or_else(|_| "oracle-fusion-erp-catalog-mcp.sqlite".to_owned());
     let database = Database::open(&database_path)?;
     let extractor = OracleExtractor::new()?;
     let mut tables = Vec::new();
@@ -155,8 +179,8 @@ fn parse_sync_args(args: &[String]) -> anyhow::Result<(String, Vec<OracleModule>
 }
 
 async fn run_mcp() -> io::Result<()> {
-    let database_path =
-        env::var("ORACLE_MCP_DATABASE").unwrap_or_else(|_| "oracle-erp-mcp.sqlite".to_owned());
+    let database_path = env::var("ORACLE_MCP_DATABASE")
+        .unwrap_or_else(|_| "oracle-fusion-erp-catalog-mcp.sqlite".to_owned());
     let database = match Database::open(&database_path) {
         Ok(database) => database,
         Err(error) => {
@@ -202,7 +226,7 @@ fn handle_request(database: &Database, request: JsonRpcRequest) -> JsonRpcRespon
             json!({
                 "protocolVersion": "2024-11-05",
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "oracle-erp-mcp", "version": env!("CARGO_PKG_VERSION") }
+                "serverInfo": { "name": "oracle-fusion-erp-catalog-mcp", "version": env!("CARGO_PKG_VERSION") }
             }),
         ),
         "notifications/initialized" => success(request.id, json!({})),
@@ -383,7 +407,7 @@ mod tests {
 
     #[test]
     fn exposes_cli_help_and_version_text() {
-        assert!(cli_help().contains("--version"));
+        assert!(cli_help().contains("oracle-fusion-erp-catalog-mcp"));
         assert!(sync_help().contains("--replace"));
         assert_eq!(env!("CARGO_PKG_VERSION"), "0.1.0");
     }
