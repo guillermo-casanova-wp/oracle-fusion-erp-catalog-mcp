@@ -21,7 +21,7 @@ Center remain subject to Oracle's terms.
 
 ## Install
 
-Install the latest release without Rust or `sudo`:
+Install the latest release:
 
 ```sh
 curl -fsSL \
@@ -29,54 +29,20 @@ curl -fsSL \
   | sh
 ```
 
-The installer places the binary in `$HOME/.local/bin`, detects the operating
-system and architecture, and asks where to register the MCP:
+## Set up your agent
 
-1. Cursor
-2. Claude Code
-3. Codex CLI
-4. OpenCode
-5. All agents
-6. Binary only
+Run the command for the agent you use, then restart that agent:
 
-For a non-interactive installation, pass the agent choice through `sh -s`:
+| Agent | Setup |
+| --- | --- |
+| Cursor | `oracle-fusion-erp-catalog-mcp install cursor --binary "$HOME/.local/bin/oracle-fusion-erp-catalog-mcp"` |
+| Claude Code | `oracle-fusion-erp-catalog-mcp install claude-code --binary "$HOME/.local/bin/oracle-fusion-erp-catalog-mcp"` |
+| Codex CLI | `oracle-fusion-erp-catalog-mcp install codex --binary "$HOME/.local/bin/oracle-fusion-erp-catalog-mcp"` |
+| OpenCode | `oracle-fusion-erp-catalog-mcp install opencode --binary "$HOME/.local/bin/oracle-fusion-erp-catalog-mcp"` |
+| All agents | `oracle-fusion-erp-catalog-mcp install all --binary "$HOME/.local/bin/oracle-fusion-erp-catalog-mcp"` |
 
-```sh
-curl -fsSL \
-  https://raw.githubusercontent.com/thegreatyamori/oracle-fusion-erp-catalog-mcp/main/scripts/install.sh \
-  | sh -s -- --agent cursor
-```
-
-Use `--agent none` to install only the binary. Other useful options include
-`--version VERSION`, `--database PATH`, `--install-dir DIRECTORY`, and
-`--asset NAME`. Forks can override the release source with `--owner` and
-`--repo`.
-
-The SQLite path is configured with `ORACLE_MCP_DATABASE`. Without an override,
-the database is stored in the platform user-data directory:
-
-- macOS: `~/Library/Application Support/oracle-fusion-erp-catalog-mcp/catalog.sqlite`
-- Linux: `${XDG_DATA_HOME:-~/.local/share}/oracle-fusion-erp-catalog-mcp/catalog.sqlite`
-- Windows: `%LOCALAPPDATA%\oracle-fusion-erp-catalog-mcp\catalog.sqlite`
-
-While existing data is being processed, an existing `oracle-erp-mcp.sqlite` in
-the current directory is used as a temporary legacy fallback. An explicit
-`ORACLE_MCP_DATABASE` path always takes precedence.
-
-Logs are written to stderr. stdout is reserved for MCP messages.
-
-You can also pass `--owner`, `--repo`, `--version`, `--install-dir`, or
-`--asset`; run `sh scripts/install.sh --help` for details. Ensure
-`$HOME/.local/bin` is on `PATH`, then register the server with an agent:
-
-```sh
-oracle-fusion-erp-catalog-mcp install all \
-  --binary "$HOME/.local/bin/oracle-fusion-erp-catalog-mcp" \
-  --database "$PWD/oracle-fusion-erp-catalog-mcp.sqlite"
-```
-
-Replace `all` with `cursor`, `claude-code`, `codex`, or `opencode`. Use
-`--dry-run` to preview configuration changes.
+Use `--dry-run` to preview changes. Set `ORACLE_MCP_DATABASE` to override the
+default database location.
 
 ## Sync
 
@@ -95,7 +61,7 @@ The database path is controlled by `ORACLE_MCP_DATABASE`.
 
 With no subcommand, the installed binary speaks JSON-RPC 2.0 over stdin/stdout.
 Logs go to stderr, while stdout is reserved for MCP messages. Configure your
-agent using the `install` command above, or try the protocol directly:
+agent using the setup command above, or try the protocol directly:
 
 ```sh
 printf '%s\n' \
@@ -106,26 +72,6 @@ printf '%s\n' \
 
 Available tools are `list_modules_and_tables`, `search_table_structure`, and
 `suggest_joins`.
-
-## Release packages
-
-Releases are built by GitHub Actions for macOS and Linux on x86_64 and
-aarch64. To publish a new version, open the `Release` workflow in GitHub
-Actions, choose **Run workflow**, and enter a version such as `0.2.0`.
-
-The workflow updates `Cargo.toml` and `Cargo.lock`, commits the release
-version to `main`, creates the matching `v0.2.0` tag, builds the four binaries,
-and publishes them with a `SHA256SUMS` file. Existing `v*` tags are also
-supported, but their version must already match `Cargo.toml`.
-
-The generated assets use the names consumed by the installer:
-
-```text
-oracle-fusion-erp-catalog-mcp-macos-x86_64
-oracle-fusion-erp-catalog-mcp-macos-aarch64
-oracle-fusion-erp-catalog-mcp-linux-x86_64
-oracle-fusion-erp-catalog-mcp-linux-aarch64
-```
 
 ## Setup dev environment
 
