@@ -31,6 +31,10 @@ pub fn update_cache_path() -> Result<PathBuf> {
     Ok(data_directory()?.join(UPDATE_CACHE_FILENAME))
 }
 
+pub fn sync_cache_directory() -> Result<PathBuf> {
+    Ok(data_directory()?.join("sync-cache"))
+}
+
 pub fn ensure_parent_directory(path: &Path) -> std::io::Result<()> {
     if let Some(parent) = path
         .parent()

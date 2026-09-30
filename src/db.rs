@@ -533,8 +533,11 @@ impl Database {
         Ok(target_id)
     }
 
-    pub fn upsert_catalog_table(&self, version_id: i64, table: &CatalogTable) -> SqlResult<i64> {
-        let tx = self.connection.unchecked_transaction()?;
+    fn upsert_catalog_table_tx(
+        tx: &rusqlite::Transaction<'_>,
+        version_id: i64,
+        table: &CatalogTable,
+    ) -> SqlResult<i64> {
         tx.execute(
             "INSERT INTO tables (version_id, module, table_name, description, source_url, object_type)
              VALUES (?1, ?2, upper(?3), ?4, ?5, ?6)
@@ -615,9 +618,24 @@ impl Database {
                 ],
             )?;
         }
+        Ok(table_id)
+    }
+
+    pub fn upsert_catalog_table(&self, version_id: i64, table: &CatalogTable) -> SqlResult<i64> {
+        let tx = self.connection.unchecked_transaction()?;
+        let table_id = Self::upsert_catalog_table_tx(&tx, version_id, table)?;
         tx.commit()?;
         self.rebuild_fts(version_id)?;
         Ok(table_id)
+    }
+
+    pub fn upsert_catalog_tables(&self, version_id: i64, tables: &[CatalogTable]) -> SqlResult<()> {
+        let tx = self.connection.unchecked_transaction()?;
+        for table in tables {
+            Self::upsert_catalog_table_tx(&tx, version_id, table)?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn rebuild_fts(&self, version_id: i64) -> SqlResult<()> {

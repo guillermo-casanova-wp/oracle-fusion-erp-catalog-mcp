@@ -4,7 +4,7 @@ use indicatif::ProgressBar;
 use reqwest::Client;
 use scraper::{Html, Selector};
 use serde::Deserialize;
-use std::{collections::BTreeSet, time::Duration};
+use std::{collections::BTreeSet, path::Path, time::Duration};
 use url::Url;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -358,6 +358,8 @@ struct ReleaseCode {
     cycle: u8,
 }
 
+const IMPORT_BATCH_SIZE: usize = 128;
+
 fn parse_release_code(value: &str) -> Result<ReleaseCode> {
     let normalized = value.trim().to_ascii_uppercase();
     if normalized.len() < 2 {
@@ -391,9 +393,23 @@ pub fn synchronize(
 pub fn synchronize_with_progress<F>(
     db: &Database,
     release: &str,
+    tables: Vec<CatalogTable>,
+    activate: bool,
+    on_progress: F,
+) -> Result<i64>
+where
+    F: FnMut(usize, usize),
+{
+    synchronize_with_progress_internal(db, release, tables, activate, on_progress, true)
+}
+
+fn synchronize_with_progress_internal<F>(
+    db: &Database,
+    release: &str,
     mut tables: Vec<CatalogTable>,
     activate: bool,
     mut on_progress: F,
+    rebuild_fts: bool,
 ) -> Result<i64>
 where
     F: FnMut(usize, usize),
@@ -440,22 +456,76 @@ where
     };
     for table in &mut tables {
         table.table_name = table.table_name.to_ascii_uppercase();
-        let mut skeleton = table.clone();
-        skeleton.columns.clear();
-        skeleton.references.clear();
-        skeleton.indexes.clear();
-        db.upsert_catalog_table(version_id, &skeleton)?;
+    }
+    for batch in tables.chunks(IMPORT_BATCH_SIZE) {
+        let skeletons: Vec<_> = batch
+            .iter()
+            .map(|table| {
+                let mut skeleton = table.clone();
+                skeleton.columns.clear();
+                skeleton.references.clear();
+                skeleton.indexes.clear();
+                skeleton
+            })
+            .collect();
+        db.upsert_catalog_tables(version_id, &skeletons)?;
     }
     let total_tables = tables.len();
-    for (index, table) in tables.iter().enumerate() {
-        db.upsert_catalog_table(version_id, table)?;
-        on_progress(index + 1, total_tables);
+    for (index, batch) in tables.chunks(IMPORT_BATCH_SIZE).enumerate() {
+        db.upsert_catalog_tables(version_id, batch)?;
+        let completed = ((index + 1) * IMPORT_BATCH_SIZE).min(total_tables);
+        on_progress(completed, total_tables);
     }
-    db.rebuild_fts(version_id)?;
+    if rebuild_fts {
+        db.rebuild_fts(version_id)?;
+    }
     if activate {
         db.activate_version(version_id)?;
         if let Some(previous) = previous {
             if previous.id != version_id && is_superior_release(&release, &previous.release_code)? {
+                db.delete_version_by_release(&previous.release_code)?;
+            }
+        }
+    }
+    Ok(version_id)
+}
+
+pub fn synchronize_cached_modules<F>(
+    db: &Database,
+    release: &str,
+    modules: &[(OracleSource, &Path)],
+    activate: bool,
+    mut on_module: F,
+) -> Result<i64>
+where
+    F: FnMut(&str, usize, usize),
+{
+    if modules.is_empty() {
+        return Err(anyhow!("sync produced no modules"));
+    }
+    let previous = db.active_version()?;
+    let mut version_id = None;
+    for (source, cache_path) in modules {
+        let tables = crate::sync_cache::read_path(source, cache_path)?;
+        let table_count = tables.len();
+        on_module(source.module.label(), 0, table_count);
+        let current_id = synchronize_with_progress_internal(
+            db,
+            release,
+            tables,
+            false,
+            |completed, total| on_module(source.module.label(), completed, total),
+            false,
+        )?;
+        version_id = Some(current_id);
+    }
+
+    let version_id = version_id.ok_or_else(|| anyhow!("sync produced no modules"))?;
+    db.rebuild_fts(version_id)?;
+    if activate {
+        db.activate_version(version_id)?;
+        if let Some(previous) = previous {
+            if previous.id != version_id && is_superior_release(release, &previous.release_code)? {
                 db.delete_version_by_release(&previous.release_code)?;
             }
         }
@@ -571,7 +641,7 @@ mod tests {
         })
         .expect("synchronize");
 
-        assert_eq!(progress, vec![(1, 2), (2, 2)]);
+        assert_eq!(progress, vec![(2, 2)]);
     }
 
     #[test]

@@ -66,6 +66,10 @@ oracle-fusion-erp-catalog-mcp sync --release 26B --module all
 Use `--module financials|scm|hcm|all`, `--no-activate`, or `--replace` as
 needed. This command is intended for catalog generation and can take a long
 time because it downloads the Oracle guides.
+The parsed result is cached by release and module under the application data
+directory, so retrying the same synchronization reuses completed modules.
+Set `ORACLE_MCP_SYNC_PARALLELISM` to control extraction concurrency; the
+default is `2`. Set it to `1` to minimize network and memory pressure.
 Synchronization activates newer releases and removes the previous active
 release after success; a missing module can be merged into an existing release.
 The database path is controlled by `ORACLE_MCP_DATABASE`.

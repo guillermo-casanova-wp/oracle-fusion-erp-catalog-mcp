@@ -1,16 +1,17 @@
+use futures::{stream::FuturesUnordered, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
 use oracle_fusion_erp_catalog_mcp::catalog;
 use oracle_fusion_erp_catalog_mcp::db::Database;
 use oracle_fusion_erp_catalog_mcp::install;
 use oracle_fusion_erp_catalog_mcp::paths;
-use oracle_fusion_erp_catalog_mcp::sync::{
-    self, synchronize_with_progress, OracleExtractor, OracleModule,
-};
+use oracle_fusion_erp_catalog_mcp::sync::{self, OracleExtractor, OracleModule};
+use oracle_fusion_erp_catalog_mcp::sync_cache;
 use oracle_fusion_erp_catalog_mcp::update;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{env, io};
+use std::{env, io, sync::Arc};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::sync::Semaphore;
 
 #[derive(Debug, Deserialize)]
 struct JsonRpcRequest {
@@ -171,53 +172,118 @@ async fn run_sync_command(args: &[String]) -> anyhow::Result<()> {
     let (release, modules, activate, replace) = parse_sync_args(args)?;
     let database_path = paths::database_path()?;
     let database = Database::open(&database_path)?;
-    let extractor = OracleExtractor::new()?;
-    let mut tables = Vec::new();
-
-    for module in modules {
-        let source = sync::OracleSource::help_center(module, &release)?;
-        eprintln!("downloading {} {}", module.label(), source.index_url);
-        let extraction_progress = ProgressBar::new_spinner();
-        extraction_progress.set_style(
-            ProgressStyle::with_template("{spinner} {msg}")
-                .unwrap_or_else(|_| ProgressStyle::default_spinner()),
-        );
-        extraction_progress.enable_steady_tick(std::time::Duration::from_millis(100));
-        extraction_progress.set_message(format!("processing {} Oracle guide", module.label()));
-        let extracted_result = extractor
-            .extract_with_progress(&source, Some(&extraction_progress))
-            .await;
-        extraction_progress.finish_and_clear();
-        let extracted = extracted_result?;
-        eprintln!(
-            "extracted {} catalog entries from {}",
-            extracted.len(),
-            module.label()
-        );
-        tables.extend(extracted);
-    }
-
     if replace {
         database.delete_version_by_release(&release)?;
     }
-    let import_progress = ProgressBar::new(tables.len() as u64);
-    import_progress.set_style(
-        ProgressStyle::with_template("{prefix} {bar:40.cyan/blue} {pos}/{len} {msg}")
-            .unwrap_or_else(|_| ProgressStyle::default_bar()),
-    );
-    import_progress.set_prefix("SQLite");
-    import_progress.set_message("writing catalog");
-    let sync_result = synchronize_with_progress(
+
+    let sources: Vec<_> = modules
+        .into_iter()
+        .map(|module| sync::OracleSource::help_center(module, &release))
+        .collect::<anyhow::Result<_>>()?;
+    let mut cached_modules = Vec::with_capacity(sources.len());
+    let mut missing_sources = Vec::new();
+    for source in sources {
+        if sync_cache::load(&source)?.is_some() {
+            eprintln!("using cached {} {}", source.module.label(), source.release);
+            cached_modules.push((source.clone(), sync_cache::cache_path(&source)?));
+        } else {
+            missing_sources.push(source);
+        }
+    }
+
+    let extractor = Arc::new(OracleExtractor::new()?);
+    let semaphore = Arc::new(Semaphore::new(sync_parallelism()?));
+    let mut extraction_tasks = FuturesUnordered::new();
+    for source in missing_sources {
+        let extractor = Arc::clone(&extractor);
+        let semaphore = Arc::clone(&semaphore);
+        extraction_tasks.push(async move {
+            let _permit = semaphore
+                .acquire_owned()
+                .await
+                .map_err(|_| anyhow::anyhow!("sync parallelism limiter was closed"))?;
+            let progress = ProgressBar::new_spinner();
+            progress.set_style(
+                ProgressStyle::with_template(&format!(
+                    "{} {{spinner}} {{msg}}",
+                    source.module.label()
+                ))
+                .unwrap_or_else(|_| ProgressStyle::default_spinner()),
+            );
+            progress.enable_steady_tick(std::time::Duration::from_millis(100));
+            progress.set_message(format!("processing {}", source.index_url));
+            let extracted = extractor
+                .extract_with_progress(&source, Some(&progress))
+                .await;
+            progress.finish_and_clear();
+            let tables = extracted?;
+            let table_count = tables.len();
+            let cache_path = sync_cache::store(&source, &tables)?;
+            eprintln!(
+                "cached {} {} catalog entries",
+                source.module.label(),
+                table_count
+            );
+            Ok::<_, anyhow::Error>((source, cache_path))
+        });
+    }
+    while let Some(task) = extraction_tasks.next().await {
+        cached_modules.push(task?);
+    }
+    cached_modules.sort_by_key(|(source, _)| source.module.label().to_owned());
+
+    let mut import_progress = None;
+    let sync_result = sync::synchronize_cached_modules(
         &database,
         &release,
-        tables,
+        &cached_modules
+            .iter()
+            .map(|(source, path)| (source.clone(), path.as_path()))
+            .collect::<Vec<_>>(),
         activate,
-        |completed, _total| import_progress.set_position(completed as u64),
+        |module, completed, total| {
+            if completed == 0 {
+                let progress = ProgressBar::new(total as u64);
+                progress.set_style(
+                    ProgressStyle::with_template("{prefix} {bar:40.cyan/blue} {pos}/{len}")
+                        .unwrap_or_else(|_| ProgressStyle::default_bar()),
+                );
+                progress.set_prefix(module.to_owned());
+                import_progress = Some(progress);
+            }
+            if let Some(progress) = import_progress.as_ref() {
+                progress.set_position(completed as u64);
+                if completed >= total {
+                    progress.finish_and_clear();
+                    import_progress = None;
+                }
+            }
+        },
     );
-    import_progress.finish_and_clear();
+    if let Some(progress) = import_progress {
+        progress.finish_and_clear();
+    }
     let version_id = sync_result?;
     eprintln!("synchronized release {release} as version {version_id}");
     Ok(())
+}
+
+fn sync_parallelism() -> anyhow::Result<usize> {
+    let configured = env::var("ORACLE_MCP_SYNC_PARALLELISM").ok();
+    parse_sync_parallelism(configured.as_deref())
+}
+
+fn parse_sync_parallelism(value: Option<&str>) -> anyhow::Result<usize> {
+    let parallelism = value
+        .unwrap_or("2")
+        .parse::<usize>()
+        .map_err(|_| anyhow::anyhow!("ORACLE_MCP_SYNC_PARALLELISM must be a positive integer"))?;
+    if parallelism == 0 {
+        return Err(anyhow::anyhow!(
+            "ORACLE_MCP_SYNC_PARALLELISM must be a positive integer"
+        ));
+    }
+    Ok(parallelism)
 }
 
 fn parse_sync_args(args: &[String]) -> anyhow::Result<(String, Vec<OracleModule>, bool, bool)> {
@@ -622,6 +688,14 @@ mod tests {
                 OracleModule::Hcm
             ]
         );
+    }
+
+    #[test]
+    fn limits_sync_parallelism_to_positive_values() {
+        assert_eq!(parse_sync_parallelism(None).expect("default"), 2);
+        assert_eq!(parse_sync_parallelism(Some("1")).expect("serial"), 1);
+        assert!(parse_sync_parallelism(Some("0")).is_err());
+        assert!(parse_sync_parallelism(Some("many")).is_err());
     }
 
     #[test]
