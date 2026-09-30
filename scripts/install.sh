@@ -15,7 +15,7 @@ Defaults:
   --version      VERSION, or latest
   --install-dir  INSTALL_DIR, or $HOME/.local/bin
   --asset        ASSET_NAME, or REPOSITORY-OS-ARCH
-  --database     DATABASE, or $PWD/oracle-fusion-erp-catalog-mcp.sqlite
+  --database     DATABASE, or the platform user-data directory
   --agent        cursor, claude-code, codex, opencode, all, or none
 
 The release asset is expected to be a directly downloadable executable.
@@ -29,7 +29,7 @@ repo=${GITHUB_REPO:-oracle-fusion-erp-catalog-mcp}
 version=${VERSION:-latest}
 install_dir=${INSTALL_DIR:-"${HOME:-}/.local/bin"}
 asset=${ASSET_NAME:-}
-database=${DATABASE:-"${PWD}/oracle-fusion-erp-catalog-mcp.sqlite"}
+database=${DATABASE:-}
 agent=${AGENT:-}
 
 while [ "$#" -gt 0 ]; do
@@ -113,7 +113,11 @@ fi
 agent=${agent:-none}
 case "$agent" in
     cursor|claude-code|codex|opencode|all)
-        "$binary" install "$agent" --binary "$binary" --database "$database"
+        if [ -n "$database" ]; then
+            "$binary" install "$agent" --binary "$binary" --database "$database"
+        else
+            "$binary" install "$agent" --binary "$binary"
+        fi
         ;;
     none)
         echo "Skipped agent configuration."
