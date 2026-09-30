@@ -57,6 +57,26 @@ Synchronization activates newer releases and removes the previous active
 release after success; a missing module can be merged into an existing release.
 The database path is controlled by `ORACLE_MCP_DATABASE`.
 
+## Release
+
+Run the complete release workflow from an up-to-date `main` branch:
+
+```sh
+scripts/release.sh 0.2.0
+```
+
+The script validates the version, runs formatting, Clippy, and tests, triggers
+the GitHub Actions release workflow, waits for completion, and prints the
+published release URL. Preview the checks and workflow trigger without
+publishing with:
+
+```sh
+scripts/release.sh 0.2.0 --dry-run
+```
+
+The GitHub workflow updates the package version, creates the tag, builds the
+platform binaries, generates checksums, and publishes the GitHub release.
+
 ## MCP usage
 
 With no subcommand, the installed binary speaks JSON-RPC 2.0 over stdin/stdout.
