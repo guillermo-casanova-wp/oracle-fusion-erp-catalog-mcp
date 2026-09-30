@@ -1,11 +1,15 @@
 use anyhow::{bail, Context, Result};
 use flate2::read::GzDecoder;
+use futures::StreamExt;
+use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::Client;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+#[cfg(test)]
+use std::io::{Cursor, Read};
 use std::{
     fs,
-    io::{Cursor, Read, Write},
+    io::Write,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -34,7 +38,7 @@ pub async fn install(release: &str, database_path: &Path) -> Result<bool> {
     let base_url = format!("https://github.com/{OWNER}/{REPOSITORY}/releases/download/{tag}");
     let client = Client::builder()
         .user_agent(format!("{REPOSITORY}/{}", env!("CARGO_PKG_VERSION")))
-        .timeout(Duration::from_secs(60))
+        .timeout(Duration::from_secs(10 * 60))
         .build()
         .context("could not create catalog HTTP client")?;
 
@@ -50,21 +54,69 @@ pub async fn install(release: &str, database_path: &Path) -> Result<bool> {
         .context("could not parse catalog manifest")?;
     validate_manifest(&manifest, &release)?;
 
-    let compressed = client
-        .get(format!("{base_url}/{}", manifest.asset))
+    let compressed_path = compressed_path(database_path);
+    let download_result = download_asset(
+        &client,
+        &format!("{base_url}/{}", manifest.asset),
+        &compressed_path,
+        &manifest.sha256,
+    )
+    .await;
+    if let Err(error) = download_result {
+        let _ = fs::remove_file(&compressed_path);
+        return Err(error);
+    }
+
+    let install_result = replace_database_from_gzip(database_path, &compressed_path);
+    let _ = fs::remove_file(&compressed_path);
+    install_result?;
+    Ok(true)
+}
+
+async fn download_asset(
+    client: &Client,
+    url: &str,
+    destination: &Path,
+    expected_checksum: &str,
+) -> Result<()> {
+    let response = client
+        .get(url)
         .send()
         .await
         .context("could not download catalog asset")?
         .error_for_status()
-        .context("catalog asset returned an error")?
-        .bytes()
-        .await
-        .context("could not read catalog asset")?;
-    verify_checksum(&compressed, &manifest.sha256)?;
+        .context("catalog asset returned an error")?;
+    let total = response.content_length();
+    let progress = total.map_or_else(ProgressBar::new_spinner, ProgressBar::new);
+    progress.set_style(total.map_or_else(ProgressStyle::default_spinner, |_| {
+        ProgressStyle::with_template("{prefix} {bar:40.cyan/blue} {bytes}/{total_bytes} {eta}")
+            .unwrap_or_else(|_| ProgressStyle::default_bar())
+            .progress_chars("##-")
+    }));
+    progress.set_prefix("Downloading catalog");
 
-    let database = decompress(&compressed)?;
-    replace_database(database_path, &database)?;
-    Ok(true)
+    let result = async {
+        crate::paths::ensure_parent_directory(destination)?;
+        let mut file =
+            fs::File::create(destination).context("could not create catalog download file")?;
+        let mut checksum = Sha256::new();
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.context("could not read catalog asset")?;
+            file.write_all(&chunk)
+                .context("could not write catalog download file")?;
+            checksum.update(&chunk);
+            progress.inc(chunk.len() as u64);
+        }
+        file.sync_all()
+            .context("could not flush catalog download file")?;
+        let actual = format!("{:x}", checksum.finalize());
+        verify_checksum(&actual, expected_checksum)?;
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+    progress.finish_and_clear();
+    result
 }
 
 fn database_has_release(path: &Path, release: &str) -> bool {
@@ -103,14 +155,14 @@ fn validate_manifest(manifest: &CatalogManifest, release: &str) -> Result<()> {
     Ok(())
 }
 
-fn verify_checksum(bytes: &[u8], expected: &str) -> Result<()> {
-    let actual = format!("{:x}", Sha256::digest(bytes));
+fn verify_checksum(actual: &str, expected: &str) -> Result<()> {
     if actual != expected.to_ascii_lowercase() {
         bail!("downloaded catalog failed SHA-256 verification");
     }
     Ok(())
 }
 
+#[cfg(test)]
 fn decompress(bytes: &[u8]) -> Result<Vec<u8>> {
     let mut decoder = GzDecoder::new(Cursor::new(bytes));
     let mut database = Vec::new();
@@ -123,10 +175,33 @@ fn decompress(bytes: &[u8]) -> Result<Vec<u8>> {
     Ok(database)
 }
 
-fn replace_database(path: &Path, database: &[u8]) -> Result<()> {
-    crate::paths::ensure_parent_directory(path)?;
-    let temporary = temporary_path(path);
-    let result = write_and_replace(&temporary, path, database);
+fn compressed_path(path: &Path) -> PathBuf {
+    let filename = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map_or("catalog.sqlite", |name| name);
+    path.with_file_name(format!(".{filename}.gz-download-{}", std::process::id()))
+}
+
+fn replace_database_from_gzip(destination: &Path, compressed: &Path) -> Result<()> {
+    crate::paths::ensure_parent_directory(destination)?;
+    let temporary = temporary_path(destination);
+    let result = (|| -> Result<()> {
+        let input = fs::File::open(compressed).context("could not open catalog download")?;
+        let mut decoder = GzDecoder::new(input);
+        let mut output =
+            fs::File::create(&temporary).context("could not create catalog temporary file")?;
+        let written =
+            std::io::copy(&mut decoder, &mut output).context("could not decompress catalog")?;
+        if written == 0 {
+            bail!("decompressed catalog is empty");
+        }
+        output
+            .sync_all()
+            .context("could not flush catalog temporary file")?;
+        fs::rename(&temporary, destination).context("could not replace local catalog")?;
+        Ok(())
+    })();
     if result.is_err() {
         let _ = fs::remove_file(&temporary);
     }
@@ -139,17 +214,6 @@ fn temporary_path(path: &Path) -> PathBuf {
         .and_then(|name| name.to_str())
         .map_or("catalog.sqlite", |name| name);
     path.with_file_name(format!(".{filename}.download-{}", std::process::id()))
-}
-
-fn write_and_replace(temporary: &Path, destination: &Path, database: &[u8]) -> Result<()> {
-    let mut file =
-        fs::File::create(temporary).context("could not create catalog temporary file")?;
-    file.write_all(database)
-        .context("could not write catalog temporary file")?;
-    file.sync_all()
-        .context("could not flush catalog temporary file")?;
-    fs::rename(temporary, destination).context("could not replace local catalog")?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -193,7 +257,12 @@ mod tests {
     fn replaces_database_atomically() {
         let directory = tempdir().expect("temporary directory");
         let path = directory.path().join("catalog.sqlite");
-        replace_database(&path, b"database").expect("replace");
+        let compressed = directory.path().join("catalog.sqlite.gz");
+        let file = fs::File::create(&compressed).expect("compressed file");
+        let mut encoder = GzEncoder::new(file, Compression::default());
+        encoder.write_all(b"database").expect("gzip input");
+        encoder.finish().expect("gzip output");
+        replace_database_from_gzip(&path, &compressed).expect("replace");
         assert_eq!(fs::read(path).expect("database"), b"database");
     }
 
@@ -201,12 +270,13 @@ mod tests {
     fn verifies_checksum() {
         let bytes = b"catalog";
         let checksum = format!("{:x}", Sha256::digest(bytes));
-        verify_checksum(bytes, &checksum).expect("checksum");
+        verify_checksum(&checksum, &checksum).expect("checksum");
     }
 
     #[test]
     fn rejects_invalid_checksum() {
-        let error = verify_checksum(b"catalog", &"0".repeat(64)).expect_err("checksum failure");
+        let error =
+            verify_checksum(&"a".repeat(64), &"0".repeat(64)).expect_err("checksum failure");
         assert!(error.to_string().contains("SHA-256"));
     }
 }
