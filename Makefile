@@ -1,21 +1,14 @@
 SHELL := /bin/sh
 
-BINARY := oracle-fusion-erp-catalog-mcp
-RELEASE ?= 26B
-MODULE ?= all
-AGENT ?= all
-DATABASE ?=
 VERSION ?=
 DRY_RUN ?=
 
-.PHONY: help verify check test sync install release
+.PHONY: help verify check test release
 
 help:
 	@printf '%s\n' \
 		'Available targets:' \
-		'  make verify RELEASE=26B' \
-		'  make sync RELEASE=26B MODULE=scm' \
-		'  make install AGENT=cursor DATABASE=/path/catalog.sqlite' \
+		'  make verify' \
 		'  make release VERSION=0.2.0 [DRY_RUN=1]'
 
 verify:
@@ -28,14 +21,6 @@ check:
 
 test:
 	cargo test --workspace
-
-sync:
-	cargo run -- sync --release "$(RELEASE)" --module "$(MODULE)"
-
-install:
-	@test -n "$(DATABASE)" || \
-		(printf '%s\n' 'DATABASE is required, for example DATABASE=/path/catalog.sqlite' >&2; exit 2)
-	cargo run -- install "$(AGENT)" --database "$(DATABASE)"
 
 release:
 	@test -n "$(VERSION)" || \

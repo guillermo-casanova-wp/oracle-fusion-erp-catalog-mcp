@@ -22,8 +22,8 @@ These instructions apply to the entire project.
   Cursor, Claude Code, Codex CLI, or OpenCode.
 - `scripts/release.sh VERSION` validates the branch, triggers the GitHub
   Actions release workflow, and waits for publication.
-- The `Makefile` provides shortcuts for verification, synchronization,
-  installation, and release automation.
+- The `Makefile` provides shortcuts for verification and release automation;
+  use the binary subcommands directly for synchronization and installation.
 - `--help` and `--version` are available at the top level and for subcommands.
 
 ## Git workflow

@@ -83,12 +83,12 @@ Common workflows are available through the `Makefile`:
 
 ```sh
 make verify
-make sync RELEASE=26B MODULE=scm
-make install AGENT=cursor DATABASE="$HOME/.local/share/oracle-fusion-erp-catalog-mcp/catalog.sqlite"
 make release VERSION=0.2.0
 ```
 
 Use `DRY_RUN=1` with `make release` to preview the workflow trigger.
+Use the binary's `sync` and `install` subcommands directly for those
+operations.
 
 ## MCP usage
 
