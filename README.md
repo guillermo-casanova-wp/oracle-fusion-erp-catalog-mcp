@@ -139,6 +139,7 @@ cargo fmt --all -- --check
 cargo check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test
+cargo install cargo-llvm-cov
 cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info
 ```
 

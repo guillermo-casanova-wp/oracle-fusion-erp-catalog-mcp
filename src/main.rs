@@ -60,7 +60,7 @@ async fn main() -> io::Result<()> {
         }
         Some("sync") => run_sync_command(&args[1..])
             .await
-            .map_err(|error| io::Error::new(io::ErrorKind::Other, error.to_string())),
+            .map_err(|error| io::Error::other(error.to_string())),
         Some("install") => run_install_command(&args[1..]),
         _ => run_mcp().await,
     }
@@ -92,7 +92,7 @@ fn run_install_command(args: &[String]) -> io::Result<()> {
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
     install::install(&options)
         .map(|_| ())
-        .map_err(|error| io::Error::new(io::ErrorKind::Other, error.to_string()))
+        .map_err(|error| io::Error::other(error.to_string()))
 }
 
 fn sync_help() -> &'static str {
@@ -205,13 +205,13 @@ fn parse_sync_args(args: &[String]) -> anyhow::Result<(String, Vec<OracleModule>
 }
 
 async fn run_mcp() -> io::Result<()> {
-    let database_path = paths::database_path()
-        .map_err(|error| io::Error::new(io::ErrorKind::Other, error.to_string()))?;
+    let database_path =
+        paths::database_path().map_err(|error| io::Error::other(error.to_string()))?;
     let database = match Database::open(&database_path) {
         Ok(database) => database,
         Err(error) => {
             eprintln!("could not open SQLite: {error}");
-            return Err(io::Error::new(io::ErrorKind::Other, error.to_string()));
+            return Err(io::Error::other(error.to_string()));
         }
     };
     let stdin = BufReader::new(tokio::io::stdin());
