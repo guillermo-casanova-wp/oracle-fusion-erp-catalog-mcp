@@ -1,12 +1,9 @@
-mod db;
-mod install;
-mod sync;
-
-use db::Database;
+use oracle_fusion_erp_catalog_mcp::db::Database;
+use oracle_fusion_erp_catalog_mcp::install;
+use oracle_fusion_erp_catalog_mcp::sync::{self, synchronize, OracleExtractor, OracleModule};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{env, io};
-use sync::{synchronize, OracleExtractor, OracleModule};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 #[derive(Debug, Deserialize)]

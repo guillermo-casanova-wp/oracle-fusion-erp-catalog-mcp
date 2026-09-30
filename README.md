@@ -3,19 +3,12 @@
 Oracle Fusion ERP Catalog MCP is a Rust MCP server for querying the Oracle
 Fusion Cloud Financials and SCM technical dictionary through SQLite and FTS5.
 
-## Status
+## Why
 
-Includes:
-
-- Versioned schema for tables, columns, references, and indexes.
-- Cloning between releases and selection of an active version.
-- Exact and lexical search with FTS5.
-- Configurable extractor for HTML, JSON, and XML indexes from Oracle Help Center.
-- Delta calculation between two releases.
-- JSON-RPC 2.0 transport over stdin/stdout and the following tools:
-  `list_modules_and_tables`, `search_table_structure`, and `suggest_joins`.
-
-The official sources and their patterns are documented in
+Oracle ERP schemas are large, versioned, and difficult to search from an agent.
+This server stores the published table metadata locally, keeps releases
+separate, and exposes exact lookup, lexical search, structure, and join tools
+over MCP. Official source patterns are documented in
 [`docs/oracle-table-sources.md`](docs/oracle-table-sources.md).
 
 ## Disclaimer
@@ -23,16 +16,19 @@ The official sources and their patterns are documented in
 Oracle and Oracle Fusion are trademarks of Oracle Corporation. This project
 is not affiliated with, endorsed by, or sponsored by Oracle Corporation.
 
-The project source code is distributed under the MIT License. Content and
-metadata retrieved from Oracle Help Center remain subject to their respective
-copyright and usage terms.
+The source code is MIT licensed; content and metadata retrieved from Oracle Help
+Center remain subject to Oracle's terms.
 
-## Running
+## Install
 
-Requires stable Rust (`cargo` and `rustc`) to be installed.
+The installer downloads a GitHub Release binary without sudo and places it in
+`$HOME/.local/bin` (on this machine, `/Users/jer.ioet/.local/bin`). The
+repository does not yet have a configured GitHub remote, so provide the future
+owner and repository:
 
 ```sh
-cargo run --release
+GITHUB_OWNER=YOUR_ORG GITHUB_REPO=YOUR_REPO \
+  sh scripts/install.sh --version 0.1.0
 ```
 
 The SQLite path is configured with `ORACLE_MCP_DATABASE`; the default is
@@ -40,66 +36,56 @@ The SQLite path is configured with `ORACLE_MCP_DATABASE`; the default is
 
 Logs are written to stderr. stdout is reserved for MCP messages.
 
-## Agent installation
-
-Register the server globally in Cursor, Claude Code, Codex CLI, or OpenCode:
-
-```sh
-cargo install --path .
-oracle-fusion-erp-catalog-mcp install all --binary "$(command -v oracle-fusion-erp-catalog-mcp)" --database "$PWD/oracle-erp-mcp.sqlite"
-```
-
-Replace `all` with `cursor`, `claude-code`, `codex`, or `opencode` to select one
-agent. Use `--dry-run` to preview changes. Installation creates missing parent
-folders, preserves unrelated configuration, updates the server entry
-idempotently, and atomically replaces changed files. The server is registered
-with the `ORACLE_MCP_DATABASE` environment variable.
-
-## Synchronization
-
-Download and store a release from the Oracle Help Center:
+You can also pass `--owner`, `--repo`, `--version`, `--install-dir`, or
+`--asset`; run `sh scripts/install.sh --help` for details. Ensure
+`$HOME/.local/bin` is on `PATH`, then register the server with an agent:
 
 ```sh
-cargo run -- sync --release 26B
+oracle-fusion-erp-catalog-mcp install all \
+  --binary "$HOME/.local/bin/oracle-fusion-erp-catalog-mcp" \
+  --database "$PWD/oracle-fusion-erp-catalog-mcp.sqlite"
 ```
 
-By default, the command synchronizes both Financials and SCM into one release
-and activates it. To synchronize only one module, replace an existing release,
-or keep the release inactive:
+Replace `all` with `cursor`, `claude-code`, `codex`, or `opencode`. Use
+`--dry-run` to preview configuration changes.
+
+## Sync
+
+Synchronize both Financials and SCM from the Oracle Help Center:
 
 ```sh
-cargo run -- sync --release 26B --module financials
-cargo run -- sync --release 26B --no-activate
-cargo run -- sync --release 26B --replace
+oracle-fusion-erp-catalog-mcp sync --release 26B
 ```
 
-If the active release is `26B`, syncing `26C` or any later release creates and
-activates the newer release, then removes the previous active release after a
-successful synchronization. A module missing from an existing release is
-merged into that release, so SCM `26B` can be completed with Financials `26B`
-without reloading SCM.
+Use `--module financials|scm`, `--no-activate`, or `--replace` as needed.
+Synchronization activates newer releases and removes the previous active
+release after success; a missing module can be merged into an existing release.
+The database path is controlled by `ORACLE_MCP_DATABASE`.
 
-The CLI also provides:
+## MCP usage
 
-```sh
-target/release/oracle-fusion-erp-catalog-mcp --help
-target/release/oracle-fusion-erp-catalog-mcp --version
-target/release/oracle-fusion-erp-catalog-mcp sync --help
-target/release/oracle-fusion-erp-catalog-mcp sync --version
-```
-
-## Initialization example
+With no subcommand, the installed binary speaks JSON-RPC 2.0 over stdin/stdout.
+Logs go to stderr, while stdout is reserved for MCP messages. Configure your
+agent using the `install` command above, or try the protocol directly:
 
 ```sh
 printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
-  | cargo run --quiet
+  | oracle-fusion-erp-catalog-mcp
 ```
 
-## Verification
+Available tools are `list_modules_and_tables`, `search_table_structure`, and
+`suggest_joins`.
+
+## Setup dev environment
+
+Install stable Rust, then build and test from a checkout. Cargo commands are
+for development only; operational and user commands above use the installed
+binary.
 
 ```sh
+cargo build --release
 cargo fmt --all -- --check
 cargo check
 cargo test

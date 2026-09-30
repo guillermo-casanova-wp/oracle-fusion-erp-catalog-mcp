@@ -109,7 +109,6 @@ impl Database {
         Ok(db)
     }
 
-    #[cfg(test)]
     pub fn in_memory() -> SqlResult<Self> {
         Self::open(":memory:")
     }
