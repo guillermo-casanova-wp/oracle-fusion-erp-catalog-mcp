@@ -485,9 +485,14 @@ fn required_string(arguments: &Value, key: &str) -> Result<String, String> {
 }
 
 fn tool_result(value: Value) -> Value {
+    let structured_content = if value.is_object() {
+        value.clone()
+    } else {
+        json!({ "data": value })
+    };
     json!({
         "content": [{ "type": "text", "text": serde_json::to_string_pretty(&value).unwrap_or_default() }],
-        "structuredContent": value,
+        "structuredContent": structured_content,
         "isError": false
     })
 }
@@ -557,6 +562,17 @@ mod tests {
                 .filter(|part| !part.is_empty())
                 .count()
                 >= 3
+        );
+    }
+
+    #[test]
+    fn wraps_non_object_structured_content() {
+        let result = tool_result(json!([{ "release_code": "26B" }]));
+
+        assert!(result["structuredContent"].is_object());
+        assert_eq!(
+            result["structuredContent"]["data"][0]["release_code"],
+            "26B"
         );
     }
 }
