@@ -244,6 +244,7 @@ fn parse_table_page(
         });
     }
 
+    let references = parse_foreign_keys(&document, &row_selector, &cell_selector)?;
     let indexes = parse_indexes(&document, &row_selector, &cell_selector)?;
     Ok(Some(CatalogTable {
         module: source.module.label().to_owned(),
@@ -252,9 +253,40 @@ fn parse_table_page(
         source_url: Some(page_url.to_string()),
         object_type: Some("TABLE".to_owned()),
         columns,
-        references: Vec::new(),
+        references,
         indexes,
     }))
+}
+
+fn parse_foreign_keys(
+    document: &Html,
+    row_selector: &Selector,
+    cell_selector: &Selector,
+) -> Result<Vec<crate::db::CatalogReference>> {
+    let foreign_keys_selector = Selector::parse(r#"table[summary="Foreign Keys"]"#)
+        .map_err(|error| anyhow!("invalid selector: {error}"))?;
+    let Some(foreign_keys_table) = document.select(&foreign_keys_selector).next() else {
+        return Ok(Vec::new());
+    };
+    let mut references = Vec::new();
+    for row in foreign_keys_table.select(row_selector) {
+        let cells: Vec<_> = row.select(cell_selector).collect();
+        if cells.len() < 3 {
+            continue;
+        }
+        let target_table = text_content(cells[1]).to_ascii_uppercase();
+        let source_column = text_content(cells[2]).to_ascii_uppercase();
+        if target_table.is_empty() || source_column.is_empty() {
+            continue;
+        }
+        references.push(crate::db::CatalogReference {
+            target_table,
+            source_column,
+            target_column: None,
+            constraint_name: None,
+        });
+    }
+    Ok(references)
 }
 
 fn parse_indexes(
@@ -545,6 +577,14 @@ mod tests {
                     </tr>
                   </tbody>
                 </table>
+                <table summary="Foreign Keys">
+                  <tbody>
+                    <tr>
+                      <td>RCV_SHIPMENT_LINES</td><td>rcv_shipments</td>
+                      <td>SHIPMENT_ID</td>
+                    </tr>
+                  </tbody>
+                </table>
                 <table summary="Indexes">
                   <tbody>
                     <tr>
@@ -569,6 +609,10 @@ mod tests {
         assert_eq!(table.columns[0].column_name, "SHIPMENT_LINE_ID");
         assert_eq!(table.columns[0].length, Some(18));
         assert!(!table.columns[0].nullable);
+        assert_eq!(table.references.len(), 1);
+        assert_eq!(table.references[0].target_table, "RCV_SHIPMENTS");
+        assert_eq!(table.references[0].source_column, "SHIPMENT_ID");
+        assert_eq!(table.references[0].target_column, None);
         assert_eq!(table.indexes[0].index_name, "RCV_SHIPMENT_LINES_U1");
         assert!(table.indexes[0].is_unique);
     }

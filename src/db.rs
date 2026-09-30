@@ -39,7 +39,7 @@ pub struct ReferenceRecord {
     pub source_table_id: i64,
     pub source_column: String,
     pub target_table_id: i64,
-    pub target_column: String,
+    pub target_column: Option<String>,
     pub constraint_name: Option<String>,
 }
 
@@ -73,7 +73,7 @@ pub struct RelatedTable {
     pub source_table: String,
     pub source_column: String,
     pub target_table: String,
-    pub target_column: String,
+    pub target_column: Option<String>,
     pub constraint_name: Option<String>,
     pub depth: usize,
 }
@@ -110,7 +110,7 @@ pub struct CatalogColumn {
 pub struct CatalogReference {
     pub target_table: String,
     pub source_column: String,
-    pub target_column: String,
+    pub target_column: Option<String>,
     pub constraint_name: Option<String>,
 }
 
@@ -239,8 +239,50 @@ impl Database {
         Ok(false)
     }
 
+    fn column_is_not_null(&self, table: &str, name: &str) -> SqlResult<bool> {
+        let mut statement = self
+            .connection
+            .prepare(&format!("PRAGMA table_info({table})"))?;
+        let mut rows = statement.query([])?;
+        while let Some(row) = rows.next()? {
+            if row.get::<_, String>(1)? == name {
+                return row.get(3);
+            }
+        }
+        Ok(false)
+    }
+
+    fn migrate_nullable_target_column(&self) -> SqlResult<bool> {
+        if !self.table_exists("foreign_key_references")?
+            || !self.column_is_not_null("foreign_key_references", "target_column")?
+        {
+            return Ok(false);
+        }
+        self.connection.execute_batch(
+            "BEGIN;
+             ALTER TABLE foreign_key_references RENAME TO foreign_key_references_legacy;
+             CREATE TABLE foreign_key_references (
+                 id INTEGER PRIMARY KEY,
+                 source_table_id INTEGER NOT NULL REFERENCES tables(id) ON DELETE CASCADE,
+                 source_column TEXT NOT NULL,
+                 target_table_id INTEGER NOT NULL REFERENCES tables(id) ON DELETE CASCADE,
+                 target_column TEXT,
+                 constraint_name TEXT,
+                 UNIQUE(source_table_id, source_column, target_table_id, target_column)
+             );
+             INSERT INTO foreign_key_references
+                 (id, source_table_id, source_column, target_table_id, target_column, constraint_name)
+             SELECT id, source_table_id, source_column, target_table_id, target_column, constraint_name
+             FROM foreign_key_references_legacy;
+             DROP TABLE foreign_key_references_legacy;
+             COMMIT;",
+        )?;
+        Ok(true)
+    }
+
     fn migrate(&self) -> SqlResult<()> {
         let rebuild_fts = self.migrate_legacy_schema()?;
+        self.migrate_nullable_target_column()?;
         self.connection.execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS versions (
@@ -274,7 +316,7 @@ impl Database {
                 source_table_id INTEGER NOT NULL REFERENCES tables(id) ON DELETE CASCADE,
                 source_column TEXT NOT NULL,
                 target_table_id INTEGER NOT NULL REFERENCES tables(id) ON DELETE CASCADE,
-                target_column TEXT NOT NULL,
+                target_column TEXT,
                 constraint_name TEXT,
                 UNIQUE(source_table_id, source_column, target_table_id, target_column)
             );
@@ -909,7 +951,7 @@ impl Database {
                     row.get::<_, String>(2)?,
                     row.get::<_, i64>(3)?,
                     row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
+                    row.get::<_, Option<String>>(5)?,
                     row.get::<_, Option<String>>(6)?,
                 ))
             })?

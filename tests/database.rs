@@ -1,4 +1,6 @@
 use oracle_fusion_erp_catalog_mcp::db::{CatalogColumn, CatalogReference, CatalogTable, Database};
+use rusqlite::Connection;
+use tempfile::tempdir;
 
 fn table(name: &str, description: &str) -> CatalogTable {
     CatalogTable {
@@ -78,8 +80,8 @@ fn discovers_columns_relationships_and_releases() {
     lines.references.push(CatalogReference {
         target_table: "PO_HEADERS_ALL".to_owned(),
         source_column: "HEADER_ID".to_owned(),
-        target_column: "ID".to_owned(),
-        constraint_name: Some("PO_LINES_HEADER_FK".to_owned()),
+        target_column: None,
+        constraint_name: None,
     });
     db.upsert_catalog_table(version_id, &lines)
         .expect("child table");
@@ -99,10 +101,72 @@ fn discovers_columns_relationships_and_releases() {
         .expect("related tables");
     assert_eq!(related[0].table.table_name, "PO_LINES_ALL");
     assert_eq!(related[0].depth, 1);
+    assert_eq!(related[0].target_column, None);
+
+    let joins = db
+        .suggest_joins("PO_HEADERS_ALL", "PO_LINES_ALL")
+        .expect("join suggestions");
+    assert_eq!(joins.len(), 1);
+    assert_eq!(joins[0].target_column, None);
 
     let releases = db.list_versions().expect("release listing");
     assert_eq!(releases[0].version.release_code, "26B");
     assert!(releases[0].version.active);
     assert_eq!(releases[0].table_count, 2);
     assert_eq!(releases[0].modules, vec!["FINANCIALS"]);
+}
+
+#[test]
+fn migrates_existing_foreign_key_schema_without_losing_target_columns() {
+    let directory = tempdir().expect("temporary directory");
+    let path = directory.path().join("catalog.sqlite");
+    let connection = Connection::open(&path).expect("legacy database");
+    connection
+        .execute_batch(
+            "CREATE TABLE versions (
+                 id INTEGER PRIMARY KEY,
+                 release_code TEXT NOT NULL UNIQUE,
+                 synced_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                 active_bool INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE TABLE tables (
+                 id INTEGER PRIMARY KEY,
+                 version_id INTEGER NOT NULL,
+                 module TEXT NOT NULL,
+                 table_name TEXT NOT NULL,
+                 description TEXT,
+                 source_url TEXT,
+                 object_type TEXT,
+                 UNIQUE(version_id, table_name)
+             );
+             CREATE TABLE foreign_key_references (
+                 id INTEGER PRIMARY KEY,
+                 source_table_id INTEGER NOT NULL,
+                 source_column TEXT NOT NULL,
+                 target_table_id INTEGER NOT NULL,
+                 target_column TEXT NOT NULL,
+                 constraint_name TEXT
+             );
+             INSERT INTO versions (id, release_code, active_bool)
+                 VALUES (1, '26B', 1);
+             INSERT INTO tables (id, version_id, module, table_name)
+                 VALUES (1, 1, 'FINANCIALS', 'CHILD_TABLE'),
+                        (2, 1, 'FINANCIALS', 'PARENT_TABLE');
+             INSERT INTO foreign_key_references
+                 (id, source_table_id, source_column, target_table_id, target_column)
+                 VALUES (1, 1, 'PARENT_ID', 2, 'ID');",
+        )
+        .expect("create legacy schema");
+    drop(connection);
+
+    let database = Database::open(&path).expect("migrate database");
+    let structure = database
+        .table_structure("CHILD_TABLE")
+        .expect("structure query")
+        .expect("child table");
+    assert_eq!(structure.outgoing_references.len(), 1);
+    assert_eq!(
+        structure.outgoing_references[0].target_column.as_deref(),
+        Some("ID")
+    );
 }
