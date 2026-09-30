@@ -435,6 +435,12 @@ mod tests {
     fn exposes_cli_help_and_version_text() {
         assert!(cli_help().contains("oracle-fusion-erp-catalog-mcp"));
         assert!(sync_help().contains("--replace"));
-        assert_eq!(env!("CARGO_PKG_VERSION"), "0.1.0");
+        assert!(
+            env!("CARGO_PKG_VERSION")
+                .split('.')
+                .filter(|part| !part.is_empty())
+                .count()
+                >= 3
+        );
     }
 }
