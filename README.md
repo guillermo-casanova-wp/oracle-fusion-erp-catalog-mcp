@@ -42,7 +42,12 @@ Run the command for the agent you use, then restart that agent:
 | All agents | `oracle-fusion-erp-catalog-mcp install all --binary "$HOME/.local/bin/oracle-fusion-erp-catalog-mcp"` |
 
 Use `--dry-run` to preview changes. Set `ORACLE_MCP_DATABASE` to override the
-default database location.
+default database location. Without an override, the database is stored as
+`catalog.sqlite` in the platform user-data directory:
+
+- macOS: `~/Library/Application Support/oracle-fusion-erp-catalog-mcp/catalog.sqlite`
+- Linux: `${XDG_DATA_HOME:-~/.local/share}/oracle-fusion-erp-catalog-mcp/catalog.sqlite`
+- Windows: `%LOCALAPPDATA%\oracle-fusion-erp-catalog-mcp\catalog.sqlite`
 
 ## Sync
 
@@ -56,39 +61,6 @@ Use `--module financials|scm`, `--no-activate`, or `--replace` as needed.
 Synchronization activates newer releases and removes the previous active
 release after success; a missing module can be merged into an existing release.
 The database path is controlled by `ORACLE_MCP_DATABASE`.
-
-## Release
-
-Run the complete release workflow from an up-to-date `main` branch:
-
-```sh
-scripts/release.sh 0.2.0
-```
-
-The script validates the version and branch state, triggers the GitHub Actions
-release workflow, waits for completion, and prints the published release URL.
-The workflow runs the project checks. Preview the workflow trigger without
-publishing with:
-
-```sh
-scripts/release.sh 0.2.0 --dry-run
-```
-
-The GitHub workflow updates the package version, creates the tag, builds the
-platform binaries, generates checksums, and publishes the GitHub release.
-
-## Make targets
-
-Common workflows are available through the `Makefile`:
-
-```sh
-make verify
-make release VERSION=0.2.0
-```
-
-Use `DRY_RUN=1` with `make release` to preview the workflow trigger.
-Use the binary's `sync` and `install` subcommands directly for those
-operations.
 
 ## MCP usage
 
@@ -124,6 +96,3 @@ For optional local coverage, install `cargo-llvm-cov` and run:
 cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info
 ```
 
-GitHub Actions runs formatting, Clippy, tests, and coverage on pushes to `main`
-and pull requests. Release artifacts are built and published only by the
-GitHub Actions release workflow.

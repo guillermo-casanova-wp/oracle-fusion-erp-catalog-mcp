@@ -1,12 +1,6 @@
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Release version, for example 0.2.0 or v0.2.0"
-        required: true
-        type: string
   push:
     tags:
       - "v*"
@@ -31,73 +25,17 @@ jobs:
       - name: Resolve and validate version
         id: release
         env:
-          INPUT_VERSION: ${{ inputs.version }}
           EVENT_TAG: ${{ github.ref_name }}
         run: |
           set -eu
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            version="${INPUT_VERSION#v}"
-          else
-            version="${EVENT_TAG#v}"
-          fi
+          version="${EVENT_TAG#v}"
           if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'; then
             echo "Version must look like 1.2.3 or 1.2.3-rc.1" >&2
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
-
-      - name: Update package version and create tag
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          VERSION: ${{ steps.release.outputs.version }}
-          TAG: ${{ steps.release.outputs.tag }}
-        run: |
-          python3 - <<'PY'
-          import os
-          import re
-          from pathlib import Path
-
-          version = os.environ["VERSION"]
-          manifest = Path("Cargo.toml")
-          text = manifest.read_text()
-          text, count = re.subn(
-              r'(?m)^version = "[^"]+"$',
-              f'version = "{version}"',
-              text,
-              count=1,
-          )
-          if count != 1:
-              raise SystemExit("could not update Cargo.toml package version")
-          manifest.write_text(text)
-
-          lock = Path("Cargo.lock")
-          lock_text = lock.read_text()
-          pattern = (
-              r'(\[\[package\]\]\nname = "'
-              + re.escape("oracle-fusion-erp-catalog-mcp")
-              + r'"\nversion = ")[^"]+(")'
-          )
-          lock_text, count = re.subn(pattern, rf'\g<1>{version}\g<2>', lock_text, count=1)
-          if count != 1:
-              raise SystemExit("could not update Cargo.lock package version")
-          lock.write_text(lock_text)
-          PY
-
-          cargo fmt --all -- --check
-          cargo check
-          cargo test
-          git diff --check
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.toml Cargo.lock
-          git commit -m "chore: release ${TAG}"
-          git push origin HEAD:main
-          git tag -a "$TAG" -m "Release $TAG"
-          git push origin "$TAG"
-
-      - name: Validate existing tag package version
-        if: github.event_name == 'push'
+      - name: Validate package version
         env:
           VERSION: ${{ steps.release.outputs.version }}
         run: |

@@ -8,7 +8,7 @@ These instructions apply to the entire project.
 
 - `src/main.rs`: MCP JSON-RPC 2.0 transport over stdin/stdout.
 - `src/db.rs`: models, SQLite schema, FTS5, and queries.
-- `src/paths.rs`: platform-specific SQLite data paths and legacy fallback.
+- `src/paths.rs`: platform-specific SQLite data paths.
 - `src/install.rs`: global MCP configuration adapters for supported agents.
 - `src/sync.rs`: Oracle extraction, quarterly synchronization, and diffs.
 - `docs/`: official sources and integration decisions.
@@ -20,8 +20,8 @@ These instructions apply to the entire project.
 - `oracle-fusion-erp-catalog-mcp sync --release RELEASE` synchronizes Oracle data.
 - `oracle-fusion-erp-catalog-mcp install AGENT` registers the server globally in
   Cursor, Claude Code, Codex CLI, or OpenCode.
-- `scripts/release.sh VERSION` validates the branch, triggers the GitHub
-  Actions release workflow, and waits for publication.
+- `scripts/release.sh --bump patch|minor|major` updates Cargo, commits, tags,
+  and pushes a release; the tag triggers the GitHub Actions release workflow.
 - The `Makefile` provides shortcuts for verification and release automation;
   use the binary subcommands directly for synchronization and installation.
 - `--help` and `--version` are available at the top level and for subcommands.
@@ -50,9 +50,7 @@ These instructions apply to the entire project.
   specifies another version.
 - Sanitize terms before building FTS5 queries.
 - Resolve the default SQLite path through the platform user-data directory;
-  `ORACLE_MCP_DATABASE` takes precedence. The default file is `catalog.sqlite`;
-  the legacy `oracle-erp-mcp.sqlite` fallback remains temporary while existing
-  data is being processed.
+  `ORACLE_MCP_DATABASE` takes precedence. The default file is `catalog.sqlite`.
 - Keep MCP stdout reserved for JSON-RPC. CLI progress and diagnostics belong
   on stderr.
 - Installer changes must preserve unrelated agent configuration and be
