@@ -61,6 +61,30 @@ pub struct TableStructure {
     pub indexes: Vec<IndexRecord>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ColumnSearchResult {
+    pub table: TableRecord,
+    pub column: ColumnRecord,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RelatedTable {
+    pub table: TableRecord,
+    pub source_table: String,
+    pub source_column: String,
+    pub target_table: String,
+    pub target_column: String,
+    pub constraint_name: Option<String>,
+    pub depth: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReleaseSummary {
+    pub version: Version,
+    pub modules: Vec<String>,
+    pub table_count: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CatalogTable {
     pub module: String,
@@ -348,6 +372,40 @@ impl Database {
         modules
     }
 
+    pub fn list_versions(&self) -> SqlResult<Vec<ReleaseSummary>> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, release_code, synced_at, active_bool
+             FROM versions ORDER BY id DESC",
+        )?;
+        let versions = statement
+            .query_map([], |row| {
+                Ok(Version {
+                    id: row.get(0)?,
+                    release_code: row.get(1)?,
+                    synced_at: row.get(2)?,
+                    active: row.get(3)?,
+                })
+            })?
+            .collect::<SqlResult<Vec<_>>>()?;
+
+        versions
+            .into_iter()
+            .map(|version| {
+                let modules = self.modules_for_version(version.id)?;
+                let table_count: usize = self.connection.query_row(
+                    "SELECT COUNT(*) FROM tables WHERE version_id = ?1",
+                    params![version.id],
+                    |row| row.get(0),
+                )?;
+                Ok(ReleaseSummary {
+                    version,
+                    modules: modules.into_iter().collect(),
+                    table_count,
+                })
+            })
+            .collect()
+    }
+
     pub fn delete_version_by_release(&self, release_code: &str) -> SqlResult<bool> {
         Ok(self.connection.execute(
             "DELETE FROM versions WHERE release_code = ?1",
@@ -594,6 +652,96 @@ impl Database {
         rows.collect()
     }
 
+    pub fn search_columns(
+        &self,
+        query: &str,
+        module: Option<&str>,
+        limit: usize,
+    ) -> SqlResult<Vec<ColumnSearchResult>> {
+        let version = self
+            .active_version()?
+            .ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)?;
+        let pattern = format!("%{}%", query.trim().to_ascii_lowercase());
+        let mut statement = self.connection.prepare(
+            "SELECT t.id, t.version_id, t.module, t.table_name, t.description,
+                    t.source_url, t.object_type,
+                    c.id, c.table_id, c.column_name, c.data_type, c.length,
+                    c.nullable, c.description
+             FROM columns c
+             JOIN tables t ON t.id = c.table_id
+             WHERE t.version_id = ?1
+               AND (?2 IS NULL OR lower(t.module) = lower(?2))
+               AND (lower(c.column_name) LIKE ?3 OR lower(COALESCE(c.description, '')) LIKE ?3)
+             ORDER BY CASE WHEN lower(c.column_name) = lower(?4) THEN 0 ELSE 1 END,
+                      t.table_name, c.column_name
+             LIMIT ?5",
+        )?;
+        let rows = statement.query_map(
+            params![version.id, module, pattern, query.trim(), limit],
+            |row| {
+                Ok(ColumnSearchResult {
+                    table: TableRecord {
+                        id: row.get(0)?,
+                        version_id: row.get(1)?,
+                        module: row.get(2)?,
+                        table_name: row.get(3)?,
+                        description: row.get(4)?,
+                        source_url: row.get(5)?,
+                        object_type: row.get(6)?,
+                    },
+                    column: ColumnRecord {
+                        id: row.get(7)?,
+                        table_id: row.get(8)?,
+                        column_name: row.get(9)?,
+                        data_type: row.get(10)?,
+                        length: row.get(11)?,
+                        nullable: row.get(12)?,
+                        description: row.get(13)?,
+                    },
+                })
+            },
+        )?;
+        rows.collect()
+    }
+
+    pub fn find_tables_by_column(
+        &self,
+        column: &str,
+        module: Option<&str>,
+        limit: usize,
+    ) -> SqlResult<Vec<TableRecord>> {
+        let version = self
+            .active_version()?
+            .ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)?;
+        let exact = column.trim().to_ascii_uppercase();
+        let prefix = format!("{exact}%");
+        let mut statement = self.connection.prepare(
+            "SELECT DISTINCT t.id, t.version_id, t.module, t.table_name,
+                    t.description, t.source_url, t.object_type
+             FROM tables t
+             JOIN columns c ON c.table_id = t.id
+             WHERE t.version_id = ?1
+               AND (?2 IS NULL OR lower(t.module) = lower(?2))
+               AND (c.column_name = ?3 OR c.column_name LIKE ?4)
+             ORDER BY CASE WHEN c.column_name = ?3 THEN 0 ELSE 1 END,
+                      t.table_name
+             LIMIT ?5",
+        )?;
+        let rows =
+            statement.query_map(params![version.id, module, exact, prefix, limit], |row| {
+                Ok(TableRecord {
+                    id: row.get(0)?,
+                    version_id: row.get(1)?,
+                    module: row.get(2)?,
+                    table_name: row.get(3)?,
+                    description: row.get(4)?,
+                    source_url: row.get(5)?,
+                    object_type: row.get(6)?,
+                })
+            })?;
+        rows.collect()
+    }
+
     pub fn table_structure(&self, table_name: &str) -> SqlResult<Option<TableStructure>> {
         let version = self
             .active_version()?
@@ -720,6 +868,131 @@ impl Database {
             })?
             .collect();
         rows
+    }
+
+    pub fn find_related_tables(
+        &self,
+        table_name: &str,
+        max_depth: usize,
+        limit: usize,
+    ) -> SqlResult<Vec<RelatedTable>> {
+        let version = self
+            .active_version()?
+            .ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)?;
+        let root: Option<i64> = self
+            .connection
+            .query_row(
+                "SELECT id FROM tables WHERE version_id = ?1 AND table_name = upper(?2)",
+                params![version.id, table_name],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(root) = root else {
+            return Ok(Vec::new());
+        };
+
+        let mut statement = self.connection.prepare(
+            "SELECT r.source_table_id, source.table_name, r.source_column,
+                    r.target_table_id, target.table_name, r.target_column,
+                    r.constraint_name
+             FROM foreign_key_references r
+             JOIN tables source ON source.id = r.source_table_id
+             JOIN tables target ON target.id = r.target_table_id
+             WHERE source.version_id = ?1
+             ORDER BY r.id",
+        )?;
+        let references = statement
+            .query_map(params![version.id], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                ))
+            })?
+            .collect::<SqlResult<Vec<_>>>()?;
+
+        let mut frontier = BTreeSet::from([root]);
+        let mut visited = BTreeSet::from([root]);
+        let mut results = Vec::new();
+        for depth in 1..=max_depth {
+            if frontier.is_empty() || results.len() >= limit {
+                break;
+            }
+            let mut next = BTreeSet::new();
+            for (
+                source_id,
+                source_name,
+                source_column,
+                target_id,
+                target_name,
+                target_column,
+                constraint_name,
+            ) in &references
+            {
+                let related_id = if frontier.contains(source_id) {
+                    Some(*target_id)
+                } else if frontier.contains(target_id) {
+                    Some(*source_id)
+                } else {
+                    None
+                };
+                let Some(related_id) = related_id else {
+                    continue;
+                };
+                if visited.contains(&related_id) {
+                    continue;
+                }
+                let related_table = if related_id == *source_id {
+                    self.table_by_id(*source_id)?
+                } else {
+                    self.table_by_id(*target_id)?
+                };
+                let Some(table) = related_table else {
+                    continue;
+                };
+                results.push(RelatedTable {
+                    table,
+                    source_table: source_name.clone(),
+                    source_column: source_column.clone(),
+                    target_table: target_name.clone(),
+                    target_column: target_column.clone(),
+                    constraint_name: constraint_name.clone(),
+                    depth,
+                });
+                visited.insert(related_id);
+                next.insert(related_id);
+                if results.len() >= limit {
+                    break;
+                }
+            }
+            frontier = next;
+        }
+        Ok(results)
+    }
+
+    fn table_by_id(&self, table_id: i64) -> SqlResult<Option<TableRecord>> {
+        self.connection
+            .query_row(
+                "SELECT id, version_id, module, table_name, description, source_url, object_type
+                 FROM tables WHERE id = ?1",
+                params![table_id],
+                |row| {
+                    Ok(TableRecord {
+                        id: row.get(0)?,
+                        version_id: row.get(1)?,
+                        module: row.get(2)?,
+                        table_name: row.get(3)?,
+                        description: row.get(4)?,
+                        source_url: row.get(5)?,
+                        object_type: row.get(6)?,
+                    })
+                },
+            )
+            .optional()
     }
 }
 

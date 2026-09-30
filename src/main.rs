@@ -5,6 +5,7 @@ use oracle_fusion_erp_catalog_mcp::paths;
 use oracle_fusion_erp_catalog_mcp::sync::{
     self, synchronize_with_progress, OracleExtractor, OracleModule,
 };
+use oracle_fusion_erp_catalog_mcp::update;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{env, io};
@@ -50,6 +51,13 @@ async fn main() -> io::Result<()> {
             println!("{}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
+        Some("update") if matches!(args.get(1).map(String::as_str), Some("-h" | "--help")) => {
+            println!("{}", update_help());
+            Ok(())
+        }
+        Some("update") => update::run(&args[1..])
+            .await
+            .map_err(|error| io::Error::other(error.to_string())),
         Some("sync") if matches!(args.get(1).map(String::as_str), Some("-h" | "--help")) => {
             println!("{}", sync_help());
             Ok(())
@@ -68,9 +76,15 @@ async fn main() -> io::Result<()> {
 
 fn cli_help() -> &'static str {
     "Oracle Fusion ERP Catalog MCP\n\n\
-Usage:\n  oracle-fusion-erp-catalog-mcp [OPTIONS]\n  oracle-fusion-erp-catalog-mcp install AGENT [OPTIONS]\n  oracle-fusion-erp-catalog-mcp sync --release RELEASE [OPTIONS]\n\n\
+Usage:\n  oracle-fusion-erp-catalog-mcp [OPTIONS]\n  oracle-fusion-erp-catalog-mcp install AGENT [OPTIONS]\n  oracle-fusion-erp-catalog-mcp update [OPTIONS]\n  oracle-fusion-erp-catalog-mcp sync --release RELEASE [OPTIONS]\n\n\
 Options:\n  -h, --help       Show this help\n  -V, --version    Show the version\n\n\
 With no command, the process starts the MCP server."
+}
+
+fn update_help() -> &'static str {
+    "Update the installed binary\n\n\
+Usage:\n  oracle-fusion-erp-catalog-mcp update [OPTIONS]\n\n\
+Options:\n  --check                 Check for an update without installing it\n  --version VERSION       Install a specific release\n  -h, --help              Show this help"
 }
 
 fn run_install_command(args: &[String]) -> io::Result<()> {
@@ -205,6 +219,7 @@ fn parse_sync_args(args: &[String]) -> anyhow::Result<(String, Vec<OracleModule>
 }
 
 async fn run_mcp() -> io::Result<()> {
+    update::notify_if_available().await;
     let database_path =
         paths::database_path().map_err(|error| io::Error::other(error.to_string()))?;
     let database = match Database::open(&database_path) {
@@ -300,6 +315,53 @@ fn tool_definitions() -> Value {
                     },
                     "required": ["table_a", "table_b"]
                 }
+            },
+            {
+                "name": "find_tables_by_column",
+                "description": "Finds active-release tables containing an exact or prefixed column name.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "column": { "type": "string" },
+                        "module": { "type": "string" },
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 100 }
+                    },
+                    "required": ["column"]
+                }
+            },
+            {
+                "name": "search_columns",
+                "description": "Searches active-release column names and descriptions.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string" },
+                        "module": { "type": "string" },
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 100 }
+                    },
+                    "required": ["query"]
+                }
+            },
+            {
+                "name": "find_related_tables",
+                "description": "Finds tables related to a table through foreign-key paths.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "table": { "type": "string" },
+                        "max_depth": { "type": "integer", "minimum": 1, "maximum": 3 },
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 100 }
+                    },
+                    "required": ["table"]
+                }
+            },
+            {
+                "name": "list_releases",
+                "description": "Lists synchronized Oracle releases and identifies the active release.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
+                }
             }
         ]
     })
@@ -356,8 +418,60 @@ fn call_tool(database: &Database, params: &Value) -> Result<Value, String> {
                 serde_json::to_value(references).map_err(|e| e.to_string())?,
             ))
         }
+        "find_tables_by_column" => {
+            let column = required_string(&arguments, "column")?;
+            let module = arguments.get("module").and_then(Value::as_str);
+            let limit = bounded_limit(&arguments);
+            let tables = database
+                .find_tables_by_column(&column, module, limit)
+                .map_err(|error| error.to_string())?;
+            Ok(tool_result(
+                serde_json::to_value(tables).map_err(|e| e.to_string())?,
+            ))
+        }
+        "search_columns" => {
+            let query = required_string(&arguments, "query")?;
+            let module = arguments.get("module").and_then(Value::as_str);
+            let limit = bounded_limit(&arguments);
+            let columns = database
+                .search_columns(&query, module, limit)
+                .map_err(|error| error.to_string())?;
+            Ok(tool_result(
+                serde_json::to_value(columns).map_err(|e| e.to_string())?,
+            ))
+        }
+        "find_related_tables" => {
+            let table = required_string(&arguments, "table")?;
+            let max_depth = arguments
+                .get("max_depth")
+                .and_then(Value::as_u64)
+                .unwrap_or(1)
+                .clamp(1, 3) as usize;
+            let related = database
+                .find_related_tables(&table, max_depth, bounded_limit(&arguments))
+                .map_err(|error| error.to_string())?;
+            Ok(tool_result(
+                serde_json::to_value(related).map_err(|e| e.to_string())?,
+            ))
+        }
+        "list_releases" => {
+            let releases = database
+                .list_versions()
+                .map_err(|error| error.to_string())?;
+            Ok(tool_result(
+                serde_json::to_value(releases).map_err(|e| e.to_string())?,
+            ))
+        }
         _ => Err(format!("tool not supported: {name}")),
     }
+}
+
+fn bounded_limit(arguments: &Value) -> usize {
+    arguments
+        .get("limit")
+        .and_then(Value::as_u64)
+        .unwrap_or(10)
+        .clamp(1, 100) as usize
 }
 
 fn required_string(arguments: &Value, key: &str) -> Result<String, String> {
@@ -434,6 +548,8 @@ mod tests {
     #[test]
     fn exposes_cli_help_and_version_text() {
         assert!(cli_help().contains("oracle-fusion-erp-catalog-mcp"));
+        assert!(cli_help().contains(" update [OPTIONS]"));
+        assert!(update_help().contains("--check"));
         assert!(sync_help().contains("--replace"));
         assert!(
             env!("CARGO_PKG_VERSION")

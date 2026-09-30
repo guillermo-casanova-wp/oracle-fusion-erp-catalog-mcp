@@ -7,19 +7,28 @@ use std::{
 
 const APPLICATION_DIRECTORY: &str = "oracle-fusion-erp-catalog-mcp";
 const DATABASE_FILENAME: &str = "catalog.sqlite";
+const UPDATE_CACHE_FILENAME: &str = "update-check.json";
 
-pub fn database_path() -> Result<PathBuf> {
+pub fn data_directory() -> Result<PathBuf> {
     if let Some(value) = env::var_os("ORACLE_MCP_DATABASE").filter(|value| !value.is_empty()) {
-        return Ok(PathBuf::from(value));
+        let database_path = PathBuf::from(value);
+        return Ok(database_path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map_or_else(|| PathBuf::from("."), Path::to_path_buf));
     }
 
     let base_dirs =
         BaseDirs::new().ok_or_else(|| anyhow!("could not determine user data directory"))?;
-    let platform_path = base_dirs
-        .data_dir()
-        .join(APPLICATION_DIRECTORY)
-        .join(DATABASE_FILENAME);
-    Ok(platform_path)
+    Ok(base_dirs.data_dir().join(APPLICATION_DIRECTORY))
+}
+
+pub fn database_path() -> Result<PathBuf> {
+    Ok(data_directory()?.join(DATABASE_FILENAME))
+}
+
+pub fn update_cache_path() -> Result<PathBuf> {
+    Ok(data_directory()?.join(UPDATE_CACHE_FILENAME))
 }
 
 pub fn ensure_parent_directory(path: &Path) -> std::io::Result<()> {

@@ -53,4 +53,15 @@ fn process_handles_initialize_and_tool_listing_as_json_rpc() {
     assert!(tools
         .iter()
         .any(|tool| tool["name"] == "search_table_structure"));
+    for name in [
+        "find_tables_by_column",
+        "search_columns",
+        "find_related_tables",
+        "list_releases",
+    ] {
+        assert!(
+            tools.iter().any(|tool| tool["name"] == name),
+            "missing {name}"
+        );
+    }
 }
