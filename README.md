@@ -112,11 +112,9 @@ Install stable Rust, then verify changes from a checkout. Operational and user
 commands above use the installed binary.
 
 ```sh
-cargo fmt --all -- --check
-cargo check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test
 make verify
+make check
+make test
 ```
 
 For optional local coverage, install `cargo-llvm-cov` and run:
