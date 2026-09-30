@@ -62,6 +62,11 @@ case "$arch" in
     *) echo "error: unsupported architecture: $arch" >&2; exit 1 ;;
 esac
 
+if [ "$os" = "macos" ] && [ "$arch" = "x86_64" ]; then
+    echo "error: Intel macOS is not supported; use an Apple Silicon build or Linux release" >&2
+    exit 1
+fi
+
 [ -n "$asset" ] || asset="${repo}-${os}-${arch}"
 case "$version" in
     latest) url="https://github.com/${owner}/${repo}/releases/latest/download/${asset}" ;;
